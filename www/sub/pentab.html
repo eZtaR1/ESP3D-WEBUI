@@ -1,0 +1,34 @@
+<div id="pentab" class="tabcontent">
+    <center><h2>Pen Calibration</h2></center>
+    <table>
+        <tr>
+            <td>Min Pulse (us):</td>
+            <td><input type="number" id="servo_min_pulse" value="1000"></td>
+            <td><button type="button" class="btn btn-default" onclick="servoTestMin()">Test Min Pulse</button></td>
+        </tr>
+        <tr>
+            <td>Max Pulse (us):</td>
+            <td><input type="number" id="servo_max_pulse" value="2000"></td>
+            <td><button type="button" class="btn btn-default" onclick="servoTestMax()">Test Max Pulse</button></td>
+        </tr>
+        <tr>
+            <td>Pen Up Position (%):</td>
+            <td><input type="number" id="servo_up_percent" min="0" max="100" value="10"></td>
+            <td><button type="button" class="btn btn-default" onclick="servoTestUp()">Test Pen Up</button></td>
+        </tr>
+        <tr>
+            <td>Pen Down Position (%):</td>
+            <td><input type="number" id="servo_down_percent" min="0" max="100" value="90"></td>
+            <td><button type="button" class="btn btn-default" onclick="servoTestDown()">Test Pen Down</button></td>
+        </tr>
+        <tr>
+            <td>Tool Name:</td>
+            <td><input type="text" id="servo_tool" value="servo"></td>
+            <td>
+                <button type="button" class="btn btn-default" onclick="loadServoConfig()">Load Config</button>
+                <button type="button" class="btn btn-default" onclick="saveServoConfig()">Save Config</button>
+            </td>
+        </tr>
+    </table>
+    <button type="button" class="btn btn-primary" onclick="saveServoSettings()">Save Settings</button>
+</div>
