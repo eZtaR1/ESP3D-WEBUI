@@ -491,6 +491,7 @@ function check_startup_message() {
 
 function show_main_UI() {
     displayUndoNone('main_ui');
+    if (typeof init_pen_panel !== 'undefined') init_pen_panel();
 }
 
 function compareStrings(a, b) {

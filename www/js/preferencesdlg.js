@@ -31,6 +31,7 @@ var defaultpreferenceslist = "[{\
                                             \"enable_commands_panel\":\"true\",\
                                             \"enable_autoscroll\":\"true\",\
                                             \"enable_verbose_mode\":\"true\",\
+                                            \"enable_pen_panel\":\"false\",\
                                             \"enable_grbl_probe_panel\":\"false\",\
                                             \"probemaxtravel\":\"40\",\
                                             \"probefeedrate\":\"100\",\
@@ -72,6 +73,7 @@ function initpreferences() {
                                             \"enable_commands_panel\":\"true\",\
                                             \"enable_autoscroll\":\"true\",\
                                             \"enable_verbose_mode\":\"true\",\
+                                            \"enable_pen_panel\":\"false\",\
                                             \"enable_grbl_probe_panel\":\"false\",\
                                             \"probemaxtravel\":\"40\",\
                                             \"probefeedrate\":\"100\",\
@@ -126,6 +128,9 @@ function prefs_toggledisplay(id_source, forcevalue) {
         case 'show_grbl_probe_tab':
             if (id(id_source).checked) displayBlock("grbl_probe_preferences");
             else displayNone("grbl_probe_preferences");
+            break;
+        case 'show_pen_panel':
+            // no additional preferences yet
             break;
     }
 }
@@ -208,6 +213,13 @@ function applypreferenceslist() {
             displayNone('camera_frame_display');
             displayNone('camera_detach_button');
         }
+        if (typeof(preferenceslist[0].enable_pen_panel) !== 'undefined') {
+            if (preferenceslist[0].enable_pen_panel === 'true') displayBlock('pentablink');
+            else {
+                id('maintablink').click();
+                displayNone('pentablink');
+            }
+        } else displayNone('pentablink');
     }
     if (preferenceslist[0].enable_grbl_probe_panel === 'true') {
         displayBlock('grblprobetablink');
@@ -402,6 +414,10 @@ function build_dlg_preferences_list() {
     if (typeof(preferenceslist[0].enable_commands_panel) !== 'undefined') {
         id('show_commands_panel').checked = (preferenceslist[0].enable_commands_panel === 'true');
     } else id('show_commands_panel').checked = false;
+    //pen panel
+    if (typeof(preferenceslist[0].enable_pen_panel) !== 'undefined') {
+        id('show_pen_panel').checked = (preferenceslist[0].enable_pen_panel === 'true');
+    } else id('show_pen_panel').checked = false;
     //autoreport interval
     if (typeof(preferenceslist[0].autoreport_interval) !== 'undefined') {
         id('preferences_autoReport_Interval').value = parseInt(preferenceslist[0].autoreport_interval);
@@ -484,6 +500,7 @@ function build_dlg_preferences_list() {
     prefs_toggledisplay('show_commands_panel');
     prefs_toggledisplay('show_files_panel');
     prefs_toggledisplay('show_grbl_probe_tab');
+    prefs_toggledisplay('show_pen_panel');
 }
 
 function closePreferencesDialog() {
@@ -518,6 +535,7 @@ function closePreferencesDialog() {
             (typeof(preferenceslist[0].interval_status) === 'undefined') ||
             (typeof(preferenceslist[0].enable_autoscroll) === 'undefined') ||
             (typeof(preferenceslist[0].enable_verbose_mode) === 'undefined') ||
+            (typeof(preferenceslist[0].enable_pen_panel) === 'undefined') ||
             (typeof(preferenceslist[0].enable_commands_panel) === 'undefined')) {
             modified = true;
         } else {
@@ -547,6 +565,7 @@ function closePreferencesDialog() {
             if (id('has_tft_usb').checked != (preferenceslist[0].has_TFT_USB === 'true')) modified = true;
             //commands
             if (id('show_commands_panel').checked != (preferenceslist[0].enable_commands_panel === 'true')) modified = true;
+            if (id('show_pen_panel').checked != (preferenceslist[0].enable_pen_panel === 'true')) modified = true;
             //interval positions
             if (id('preferences_autoReport_Interval').value != parseInt(preferenceslist[0].autoReport_interval)) modified = true;
             if (id('preferences_pos_Interval_check').value != parseInt(preferenceslist[0].interval_positions)) modified = true;
@@ -668,6 +687,7 @@ function SavePreferences(current_preferences) {
         saveprefs += "\",\"f_filters\":\"" + id('preferences_filters').value;
         saveprefs += "\",\"enable_autoscroll\":\"" + id('preferences_autoscroll').checked;
         saveprefs += "\",\"enable_verbose_mode\":\"" + id('preferences_verbose_mode').checked;
+        saveprefs += "\",\"enable_pen_panel\":\"" + id('show_pen_panel').checked;
         saveprefs += "\",\"enable_commands_panel\":\"" + id('show_commands_panel').checked + "\"}]";
         preferenceslist = JSON.parse(saveprefs);
     }
