@@ -341,6 +341,7 @@ function applypreferenceslist() {
 
 function showpreferencesdlg() {
     var modal = setactiveModal('preferencesdlg.html');
+    if (typeof pen_load !== 'undefined') pen_load();
     if (modal == null) return;
     language_save = language;
     build_dlg_preferences_list();

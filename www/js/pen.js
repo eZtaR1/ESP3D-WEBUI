@@ -661,7 +661,7 @@ function pen_frame_go() {
 }
 
 function init_pen_panel() {
-    if (!pen_el("pentab")) return;
+    if (!pen_el("grblpentab")) return;
     var f = get_localdata("pen_config_file");
     if (f) pen_el("pen_config_file").value = f;
     pen_load();

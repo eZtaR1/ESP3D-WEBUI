@@ -438,6 +438,51 @@
                     </div>
                 </div>
             </div>
+            <div class="panel panel-default">
+                <div class="panel-heading">
+                    <b>Pen plotter (servo on Z)</b>
+                </div>
+                <div class="panel-body" id="pen_preferences">
+                <table style="margin: 0 auto 0 0; border-spacing: 0.4em; border-collapse: separate;">
+                    <tr>
+                        <td><label for="pen_max_pulse">Pulse at Z0</label></td>
+                        <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_max_pulse" min="500" max="2500" step="10"></td>
+                        <td>us <small>(max_pulse_us - top of the range)</small></td>
+                    </tr>
+                    <tr>
+                        <td><label for="pen_min_pulse">Pulse at bottom</label></td>
+                        <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_min_pulse" min="500" max="2500" step="10"></td>
+                        <td>us <small>(min_pulse_us - at Z minus travel)</small></td>
+                    </tr>
+                    <tr>
+                        <td><label for="pen_z_travel">Z travel</label></td>
+                        <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_z_travel" min="1" max="100"></td>
+                        <td>mm <small>(max_travel_mm - restart needed)</small></td>
+                    </tr>
+                    <tr>
+                        <td><label for="pen_z_rate">Pen speed</label></td>
+                        <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_z_rate" min="10" step="100"></td>
+                        <td>mm/min <small>(Z max_rate - lower for a softer landing)</small></td>
+                    </tr>
+                    <tr>
+                        <td><label for="pen_planner_blocks">Planner blocks</label></td>
+                        <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_planner_blocks" min="10" max="120"></td>
+                        <td><small>(planner_blocks - lookahead, try 32-64; restart needed)</small></td>
+                    </tr>
+                </table>
+                <div style="text-align: center;">
+                    <button type="button" class="btn btn-primary" onclick="pen_settings_save()">Apply to controller</button>
+                </div>
+                <div style="display: flex; gap: 0.5em; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 0.8em;">
+                    <label for="pen_config_file">Config file</label>
+                    <input autocomplete="off" type="text" class="form-control" style="width: 10em;" id="pen_config_file" value="config.yaml" onchange="pen_save_settings()">
+                    <button type="button" class="btn btn-default btn-sm" onclick="pen_load()">Reload</button>
+                </div>
+                <p class="pen-status" style="text-align: center; font-weight: bold; margin: 0.5em 0 0 0;"></p>
+                <p style="text-align: center; margin-top: 0.5em;"><small>Saved straight to the controller, separate from the preferences Save. Only these lines in the config file are changed.
+                    The original file is saved once as <i>.bak</i>.</small></p>
+                </div>
+            </div>
         </div>
         <div class="modal-footer">
             <div class="pull-left" id="preferencesdlg_upload_msg">
