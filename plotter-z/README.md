@@ -28,7 +28,7 @@ change pen heights, so the copies here are only the starting point.
 | Homing | Sensorless (StallGuard) toward negative, X first then Y. X: seek 2000 / feed 500 / stallguard 24. Y: stallguard 30. Set up following [TMC2209 and UART using FluidNC](https://diode-laser-wiki.com/documentation/projects/tmc2209-and-uart-using-fluidnc/) |
 | After homing | Pen up, then park at X398 Y362 |
 | Motors | Always held (`idle_ms: 255`); required, the machine is wall-mounted |
-| Pen | RC servo on Z, signal on `gpio.22`, 50 Hz |
+| Pen | RC servo on Z, signal on `gpio.22`, 50 Hz, in a [CNC pen lift remixed for V-slot with a metal pen clip](https://makerworld.com/en/models/1755233-cnc-pen-lift-remixed-for-v-slot-metal-pen-clip#profileId-1866505) |
 
 ## Pen = Z axis
 
