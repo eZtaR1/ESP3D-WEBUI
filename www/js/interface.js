@@ -24,27 +24,29 @@ const sendCommand = (cmd) => {
     SendPrinterCommand(cmd, true, get_Position);
 }
 
-const getAxisValueSuccess = () => {}
-
-const getAxisValueFailure = () => {
-    displayer.disableBoundary()
-    // console.log("Failed to get axis data");
-}
-
+// webui3's askAxis() posts a message to the parent frame and picks up the
+// reply asynchronously via processMessage/axisResult (see
+// tablet/src/webui3/interfase.js). We have no parent frame to talk to --
+// tablet/src/tablet/*.js runs directly in this page -- so we just send the
+// query like any other $ command; the echoed "$name=value" response comes
+// back through the normal socket monitor pipeline (app.js's
+// grblHandleMessage -> tabletShowMessage -> getDollarResult, see
+// tablet/src/tablet/tablet.js).
 const askAxis = (name) => {
-    var url = "/command?plain=" + encodeURIComponent(name);
-    SendGetHttp(url, getAxisValueSuccess, getAxisValueFailure);
+    sendCommand(name);
 }
 
 const files_downloadFile = (name) => {
-    fetch(encodeURIComponent('SD' + gCodeFilename))
-        .then(response => response.text())
-        .then(gcode => showGCode(gcode));
+    // fileRead() now expects a fully-qualified path (see filetransport.js) --
+    // gCodeFilename is SD-relative (job files are always run via $sd/run=),
+    // so qualify it explicitly rather than relying on fileRead()'s volume
+    // argument to do that.
+    fileRead(FILE_VOLUME_SD, '/sd' + gCodeFilename, showGCode);
 };
 
 const tabletGetFileList = (path) => {
     gCodeFilename = '';
-    SendGetHttp('/upload?path=' + encodeURI(path), files_list_success);
+    fileList(FILE_VOLUME_SD, path, files_list_success);
 }
 
 const toggleDropdown = () => {
@@ -53,7 +55,9 @@ const toggleDropdown = () => {
 
 const enterFullscreen = () => {
     try {
-        document.documentElement.requestFullscreen();
+        // requestFullscreen() returns a promise that rejects if the browser
+        // refuses, e.g. without a user gesture
+        document.documentElement.requestFullscreen().catch((err) => console.log('Fullscreen refused: ' + err));
     } catch (exception) {
         try {
             document.documentElement.webkitRequestFullscreen();
@@ -88,8 +92,7 @@ const toggleFullscreen = () => {
 }
 
 const addInterfaceListeners = () => {
-    id('tablettablink').addEventListener('DOMActivate', fullscreenIfMobile, false);
-    id('tablettablink').addEventListener('DOMActivate', setBottomHeight, false);
+    id('tablettablink').addEventListener('click', setBottomHeight, false);
 
 //    id('tablettab').addEventListener('activate', askMachineBbox, false);
 
@@ -98,9 +101,16 @@ const addInterfaceListeners = () => {
     id('toolpath').addEventListener("mouseup", updateGcodeViewerAngle);
 };
 
-const fullscreenIfMobile = () => {
-    if (/Mobi|Android/i.test(navigator.userAgent)) {
-        toggleFullscreen();
+// Go fullscreen automatically on touch devices.  This tests for a touch
+// screen rather than the user agent, because tablet browsers often report a
+// desktop user agent - iPadOS Safari always does, and Chrome on Android
+// tablets requests desktop sites by default.  It only enters fullscreen,
+// never toggles, so returning to an already-fullscreen tablet tab does not
+// exit fullscreen.
+const fullscreenIfTouch = () => {
+    const isTouch = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+    if (isTouch && !document.fullscreenElement && !document.webkitFullscreenElement) {
+        enterFullscreen();
     }
 }
 const initInterface = () => {
@@ -253,7 +263,7 @@ const tryAutoReport = () => {
                        () => {},
 
                        // Fall back to polling if the firmware does not support auto-reports
-                       () => {    
+                       () => {
                            enablePolling();
                        },
 
@@ -308,7 +318,7 @@ const onstatusIntervalChange = () => {
 
 //TODO handle authentication issues
 //errorfn cannot be NULL
-const get_status = () => {      
+const get_status = () => {
     sendRealtimeCmd('\x3f'); // '?'
 }
 
@@ -390,6 +400,7 @@ const mainGrblState = (grblstate) => {
     show_grbl_status(grblstate.stateName, grblstate.message, grblstate.sdName);
     show_grbl_SD(grblstate.sdName, grblstate.sdPercent);
     show_grbl_probe_status(grblstate.pins && (grblstate.pins.indexOf('P') != -1));
+    if (typeof pen_watch_homing !== 'undefined') pen_watch_homing(grblstate);
 };
 
 const grblHandleOk = () => {
@@ -430,7 +441,7 @@ const onVisible = (element, callback) => {
 let tabletLoaded = false;
 const initTablet = () => {
     if (!tabletLoaded) {
-        toggleDropdown();
+        hideMenu();
         addListeners();
         setBottomHeight();
         tabletLoaded = true;
@@ -446,6 +457,13 @@ const setupTablet = () => {
     initInterface();
     requestModes();
     askMachineBbox();
+    // Attached here rather than in addInterfaceListeners(), which does not
+    // run until the tablet first becomes visible - after the click that
+    // shows it, so the first switch to the tablet would not go fullscreen.
+    // Uses click rather than the deprecated DOMActivate event.  Fullscreen
+    // must be requested synchronously from the click handler, while the
+    // browser still considers it a user gesture.
+    id('tablettablink').addEventListener('click', fullscreenIfTouch, false);
     onVisible(id('tablettab'), initTablet);
 }
 

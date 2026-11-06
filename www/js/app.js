@@ -1,4 +1,3 @@
-var ESP3D_authentication = false;
 var convertDHT2Fahrenheit = false;
 var ws_source;
 var event_source;
@@ -28,15 +27,18 @@ var EP_DIRECT_SD_CHECK = 853;
 var SETTINGS_AP_MODE = 1;
 var SETTINGS_STA_MODE = 2;
 var SETTINGS_FALLBACK_MODE = 3;
-var interval_ping = -1;
-var last_ping = 0;
+var ws_activity_interval = -1;
+var last_ws_activity = 0;
 var enable_ping = true;
 var esp_error_message ="";
 var esp_error_code = 0;
 
+function set_page_id(id) {
+    page_id = id;
+    // console.log("connection id = " + page_id);
+}
 function Init_events(e) {
-    page_id = e.data;
-    console.log("connection id = " + page_id);
+    set_page_id(e.data);
 }
 
 function ActiveID_events(e) {
@@ -80,7 +82,7 @@ function browser_is(bname) {
 window.onload = function() {
     //to check if javascript is disabled like in anroid preview
     displayNone('loadingmsg');
-    console.log("Connect to board");
+    // console.log("Connect to board");
     connectdlg();
     //ugly hack for IE
     console.log(navigator.userAgent);
@@ -96,7 +98,11 @@ var wsmsg = "";
 
 function startSocket() {
     try {
-        if (async_webcommunication) {
+        if (in_ui_dir()) {
+            // The WebSocket shares the page's URL, as it does at /, and its
+            // host, so the browser sends this WebUI's session cookie with it
+            ws_source = new WebSocket('ws://' + document.location.host + ui_base, ['arduino']);
+        } else if (async_webcommunication) {
             ws_source = new WebSocket('ws://' + document.location.host + '/ws', ['arduino']);
         } else {
             console.log("Socket is " + websocket_ip + ":" + websocket_port);
@@ -110,7 +116,7 @@ function startSocket() {
         console.log("Connected");
     };
     ws_source.onclose = function(e) {
-        console.log("Disconnected");
+        console.log(" Disconnected");
         //seems sometimes it disconnect so wait 3s and reconnect
         //if it is not a log off
         if (!log_off) setTimeout(startSocket, 3000);
@@ -123,42 +129,44 @@ function startSocket() {
         var msg = "";
         //bin
         if (e.data instanceof ArrayBuffer) {
+            // Array of response lines
             var bytes = new Uint8Array(e.data);
             for (var i = 0; i < bytes.length; i++) {
                 msg += String.fromCharCode(bytes[i]);
                 if (bytes[i] == 10) {
                     wsmsg += msg.replace('\r\n', '\n');
+                    // console.log(wsmsg);
                     var thismsg = wsmsg;
                     wsmsg = "";
                     msg = "";
                     Monitor_output_Update(thismsg);
                     process_socket_response(thismsg);
-                    if (!((thismsg.startsWith("<") || thismsg.startsWith("ok T:") || thismsg.startsWith("X:") || thismsg.startsWith("FR:") ||thismsg.startsWith("echo:E0 Flow"))))
-                        console.log(thismsg);
+                    if (typeof pen_watch_line !== 'undefined') pen_watch_line(thismsg);
+                    if (!((thismsg.startsWith("<") || thismsg.startsWith("ok T:") || thismsg.startsWith("X:") || thismsg.startsWith("FR:") ||thismsg.startsWith("echo:E0 Flow")))) {
+                        // console.log(thismsg);
+                    }
                 }
             }
             wsmsg += msg;
         } else {
+            // Out of band messages
+            // console.log(e.data);
             msg += e.data;
             var tval = msg.split(":");
-            if (tval.length >= 2) {
+            // console.log(tval);
+            if (tval.length >= 1) {
                 if (tval[0] == 'CURRENT_ID') {
-                    page_id = tval[1];
-                    console.log("connection id = " + page_id);
+                    console.log("Got CURRENT_ID " + tval[1]);
+                    set_page_id(tval[1]);
                 }
-                if (enable_ping) {
-                    if (tval[0] == 'PING') {
-                        page_id = tval[1];
-                        // console.log("ping from id = " + page_id);
-                        last_ping = Date.now();
-                        if (interval_ping == -1) interval_ping = setInterval(function() {
-                            check_ping();
-                        }, 10 * 1000);
-                    }
+                if (tval[0] == 'PING') {
+                    // console.log("ping from id = " + tval[1]);
                 }
                 if (tval[0] == 'ACTIVE_ID') {
+                    console.log("ACTIVE_ID = " + tval[1]);
                     if (page_id != tval[1]) {
-                        Disable_interface();
+//                        console.log("Closing due to wrong ACTIVE_ID");
+//                        Disable_interface();
                     }
                 }
                 if (tval[0] == 'DHT') {
@@ -176,18 +184,22 @@ function startSocket() {
                     console.log("MSG: " + tval[2] + " code:" +  tval[1]);
                 }
             }
-
         }
         //console.log(msg);
 
+        // Any activity keeps the connection alive.  Pings are just forced messages
+        last_ws_activity = Date.now();
+        if (ws_activity_interval == -1) ws_activity_interval = setInterval(function() {
+             check_ping();
+         }, 10 * 1000);
     };
 }
 
 function check_ping() {
-    //if ((Date.now() - last_ping) > 20000){
-    //Disable_interface(true);
-    //console.log("No heart beat for more than 20s");
-    //}
+    if ((Date.now() - last_ws_activity) > 10000) {
+        Disable_interface(true);
+        console.log("No heart beat for more than 10 seconds");
+    }
 }
 
 function disable_items(item, state) {
@@ -199,14 +211,13 @@ function ontogglePing(forcevalue) {
     if (typeof forcevalue != 'undefined') enable_ping = forcevalue;
     else enable_ping = !enable_ping;
     if (enable_ping) {
-        if (interval_ping != -1) clearInterval(interval_ping);
-        last_ping = Date.now();
-        interval_ping = setInterval(function() {
+        if (ws_activity_interval != -1) clearInterval(ws_activity_interval);
+        last_ws_activity = Date.now();
+        ws_activity_interval = setInterval(function() {
             check_ping();
         }, 10 * 1000);
-        console.log("enable ping");
     } else {
-        if (interval_ping != -1) clearInterval(interval_ping);
+        if (ws_activity_interval != -1) clearInterval(ws_activity_interval);
         console.log("disable ping");
     }
 }
@@ -269,7 +280,7 @@ function Disable_interface(lostconnection) {
     //block all communication
     http_communication_locked = true;
     log_off = true;
-    if (interval_ping != -1) clearInterval(interval_ping);
+    if (ws_activity_interval != -1) clearInterval(ws_activity_interval);
     //clear all waiting commands
     clear_cmd_list();
     //no camera 
@@ -358,7 +369,7 @@ function update_UI_firmware_target() {
 
     if (typeof id('fwName') != "undefined") id('fwName').innerHTML = fwName;
     //SD image or not
-    if (direct_sd && typeof id('showSDused') != "undefined") id('showSDused').innerHTML = "<svg width='1.3em' height='1.2em' viewBox='0 0 1300 1200'><g transform='translate(50,1200) scale(1, -1)'><path  fill='#777777' d='M200 1100h700q124 0 212 -88t88 -212v-500q0 -124 -88 -212t-212 -88h-700q-124 0 -212 88t-88 212v500q0 124 88 212t212 88zM100 900v-700h900v700h-900zM500 700h-200v-100h200v-300h-300v100h200v100h-200v300h300v-100zM900 700v-300l-100 -100h-200v500h200z M700 700v-300h100v300h-100z' /></g></svg>";
+    if (typeof id('showSDused') != "undefined") id('showSDused').innerHTML = "<svg width='1.3em' height='1.2em' viewBox='0 0 1300 1200'><g transform='translate(50,1200) scale(1, -1)'><path  fill='#777777' d='M200 1100h700q124 0 212 -88t88 -212v-500q0 -124 -88 -212t-212 -88h-700q-124 0 -212 88t-88 212v500q0 124 88 212t212 88zM100 900v-700h900v700h-900zM500 700h-200v-100h200v-300h-300v100h200v100h-200v300h300v-100zM900 700v-300l-100 -100h-200v500h200z M700 700v-300h100v300h-100z' /></g></svg>";
     else id('showSDused').innerHTML = "";
     return fwName;
 }
@@ -370,10 +381,9 @@ function Set_page_title(page_title) {
 
 function initUI() {
     console.log("Init UI");
-    if (ESP3D_authentication) connectdlg(false);
     AddCmd(display_boot_progress);
     //initial check
-    if ((typeof target_firmware == "undefined") || (typeof web_ui_version == "undefined") || (typeof direct_sd == "undefined")) alert('Missing init data!');
+    if ((typeof target_firmware == "undefined") || (typeof web_ui_version == "undefined")) alert('Missing init data!');
     //check FW
     update_UI_firmware_target();
     //set title using hostname
@@ -385,8 +395,8 @@ function initUI() {
     // Get the element with id="defaultOpen" and click on it
     id("maintablink").click();
 
-    if (typeof id("grblcontroltablink") !== 'undefined') {
-        id("grblcontroltablink").click();
+    if (typeof id("grblpentablink") !== 'undefined') {
+        id("grblpentablink").click();
     }
 
     //removeIf(production)
@@ -463,7 +473,8 @@ function check_startup_message() {
 
         errorOrWarning = false;
         for (i = 0; i < endPos; i++) {
-            if (Monitor_output[i].startsWith("[MSG:ERR") || Monitor_output[i].startsWith("[MSG:WARN")) {
+//            if (Monitor_output[i].startsWith("[MSG:ERR") || Monitor_output[i].startsWith("[MSG:WARN")) {
+            if (Monitor_output[i].startsWith("[MSG:ERR")) {
                 errorOrWarning = true;
                 break;
             }
@@ -491,6 +502,7 @@ function check_startup_message() {
 
 function show_main_UI() {
     displayUndoNone('main_ui');
+    if (typeof init_pen_panel !== 'undefined') init_pen_panel();
 }
 
 function compareStrings(a, b) {

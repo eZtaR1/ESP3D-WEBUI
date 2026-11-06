@@ -55,7 +55,7 @@ function init_files_panel(dorefresh) {
     files_set_button_as_filter(files_filter_sd_list);
     var refreshlist = true;
     if (typeof dorefresh !== 'undefined') refreshlist = dorefresh;
-    if (direct_sd && refreshlist) files_refreshFiles(files_currentPath);
+    if (refreshlist) files_refreshFiles(files_currentPath);
 }
 
 function files_set_button_as_filter(isfilter) {
@@ -184,12 +184,8 @@ function process_files_Createdir(answer) {
 }
 
 function files_create_dir(name) {
-    if (direct_sd) {
-        var cmdpath = files_currentPath;
-        var url = "/upload?path=" + encodeURIComponent(cmdpath) + "&action=createdir&filename=" + encodeURIComponent(name);
-        displayBlock('files_nav_loader');
-        SendGetHttp(url, files_list_success, files_list_failed);
-    }
+    displayBlock('files_nav_loader');
+    fileCreateDir(FILE_VOLUME_SD, files_currentPath, name, files_list_success, files_list_failed);
 }
 
 function files_delete(index) {
@@ -206,18 +202,9 @@ function process_files_Delete(answer) {
 
 function files_delete_file(index) {
     files_error_status = "Delete " + files_file_list[index].name;
-    if (direct_sd) {
-        var cmdpath = files_currentPath;
-        var url = "/upload?path=" + encodeURIComponent(cmdpath) + "&action=";
-        if (files_file_list[index].isdir) {
-            url += "deletedir&filename=";
-        } else {
-            url += "delete&filename=";
-        }
-        url += encodeURIComponent(files_file_list[index].sdname);
-        displayBlock('files_nav_loader');
-        SendGetHttp(url, files_list_success, files_list_failed);
-    }
+    displayBlock('files_nav_loader');
+    var op = files_file_list[index].isdir ? fileDeleteDir : fileDelete;
+    op(FILE_VOLUME_SD, files_currentPath, files_file_list[index].sdname, files_list_success, files_list_failed);
 }
 
 function files_proccess_and_update(answer) {
@@ -251,9 +238,7 @@ function files_proccess_and_update(answer) {
 }
 
 function files_is_clickable(index) {
-    var entry = files_file_list[index];
-    if (entry.isdir) return true;
-    return direct_sd;
+    return true;
 }
 
 function files_enter_dir(name) {
@@ -274,19 +259,12 @@ function process_files_rename(new_file_name) {
         return;
     }
     files_error_status = "Rename " + old_file_name;
-
-    var cmdpath = files_currentPath;
-    var url = "/upload?path=" + encodeURIComponent(cmdpath) + "&action=rename";
-    url += "&filename=" + encodeURIComponent(old_file_name);
-    url += "&newname=" + encodeURIComponent(new_file_name);
     displayBlock('files_nav_loader');
-    SendGetHttp(url, files_list_success, files_list_failed);
+    fileRename(FILE_VOLUME_SD, files_currentPath, old_file_name, new_file_name, files_list_success, files_list_failed);
 }
 function files_download(index) {
     var entry = files_file_list[index];
-    //console.log("file on direct SD");
-    var url = "SD/" + files_currentPath + entry.sdname;
-    window.location.href = encodeURIComponent(url.replace("//", "/"));
+    window.location.href = fileDownloadUrl(FILE_VOLUME_SD, files_currentPath, entry.sdname);
 }
 function files_click_file(index) {
     var entry = files_file_list[index];
@@ -294,12 +272,7 @@ function files_click_file(index) {
         files_enter_dir(entry.name);
         return;
     }
-    if (false && direct_sd) {  // Don't download on click; use the button
-        //console.log("file on direct SD");
-        var url = "SD/" + files_currentPath + entry.sdname;
-        window.location.href = encodeURIComponent(url.replace("//", "/"));
-        return;
-    }
+    // Don't download on click; use the button
 }
 
 function files_isgcode(filename, isdir) {
@@ -320,11 +293,6 @@ function files_isgcode(filename, isdir) {
 }
 
 function files_showdeletebutton(index) {
-    //can always deleted dile or dir ?
-    //if /ext/ is serial it should failed as fw does not support it
-    //var entry = files_file_list[index];    
-    //if (direct_sd) return true;
-    //if (!entry.isdir) return true;
     return true;
 }
 
@@ -361,11 +329,7 @@ function files_refreshFiles(path, usecache) {
     clearTabletFileSelector("Refreshing file list");
     displayBlock('files_list_loader');
     displayBlock('files_nav_loader');
-    //this is pure direct SD
-    if (direct_sd) {
-        var url = "/upload?path=" + encodeURI(cmdpath);
-        SendGetHttp(url, files_list_success, files_list_failed);
-    }
+    fileList(FILE_VOLUME_SD, cmdpath, files_list_success, files_list_failed);
 }
 
 function files_format_size(size) {
@@ -563,33 +527,6 @@ function files_select_upload() {
     id('files_input_file').click();
 }
 
-function files_check_if_upload() {
-    var canupload = true;
-    var files = id("files_input_file").files;
-    if (direct_sd) {
-        var url = "/command?plain=" + encodeURIComponent("[ESP400]");
-        SendGetHttp(url, process_check_sd_presence);
-    } else {
-        //no reliable way to know SD is present or not so let's upload
-        files_start_upload();
-    }
-}
-
-function process_check_sd_presence(answer) {
-    //console.log(answer);
-    //for direct SD there is a SD check
-    if (direct_sd) {
-        if (answer.indexOf("o SD card") > -1) {
-            alertdlg(translate_text_item("Upload failed"), translate_text_item("No SD card detected"));
-            files_error_status = "No SD card"
-            files_build_display_filelist(false);
-            id('files_sd_status_msg').innerHTML = translate_text_item(files_error_status, true);
-            displayTable('files_status_sd_status');
-        } else files_start_upload();
-    } else { //for smoothiware ls say no directory
-        files_start_upload();
-    }
-}
 
 function files_start_upload() {
     if (http_communication_locked) {
@@ -597,7 +534,6 @@ function files_start_upload() {
         console.log("communication locked");
         return;
     }
-    var url = "/upload";
     var path = files_currentPath;
     var files = id("files_input_file").files;
 
@@ -605,23 +541,11 @@ function files_start_upload() {
         console.log("nothing to upload");
         return;
     }
-    var formData = new FormData();
-
-    formData.append('path', path);
-    for (var i = 0; i < files.length; i++) {
-        var file = files[i];
-        var arg = path + file.name + "S";
-        //append file size first to check updload is complete
-        formData.append(arg, file.size);
-        formData.append('myfile[]', file, path + file.name);
-    }
-    files_error_status = "Upload " + file.name;
-    id('files_currentUpload_msg').innerHTML = file.name;
+    files_error_status = "Upload " + files[files.length - 1].name;
+    id('files_currentUpload_msg').innerHTML = files[files.length - 1].name;
     displayBlock('files_uploading_msg');
     displayNone('files_navigation_buttons');
-    if (direct_sd) {
-        SendFileHttp(url, formData, FilesUploadProgressDisplay, files_list_success, files_directSD_upload_failed);
-    }
+    fileUpload(FILE_VOLUME_SD, path, files, FilesUploadProgressDisplay, files_list_success, files_directSD_upload_failed);
     id("files_input_file").value = "";
 }
 

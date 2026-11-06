@@ -6,8 +6,7 @@ function restartdlg() {
     displayBlock('prgrestart');
     id('restartmsg').innerHTML = translate_text_item("Restarting, please wait....");
     showModal();
-    url = "/command?plain=" + encodeURIComponent("[ESP444]RESTART");
-    SendGetHttp(url, restart_esp_success, restart_esp_failed);
+    firmwareCommand("[ESP444]RESTART", restart_esp_success, restart_esp_failed);
 }
 
 function restart_esp_success(response) {
@@ -17,7 +16,7 @@ function restart_esp_success(response) {
     http_communication_locked = true;
     x.max = 10;
     interval = setInterval(function() {
-        last_ping = Date.now();
+        last_ws_activity = Date.now();
         i = i + 1;
         var x = id("prgrestart");
         x.value = i;

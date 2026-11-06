@@ -3,7 +3,6 @@ var config_override_List = [];
 var config_lastindex = -1
 var config_error_msg = "";
 var config_lastindex_is_override = false;
-var commandtxt = "$$";
 var is_override_config = false;
 var config_file_name = "/sd/config";
 
@@ -22,7 +21,6 @@ function refreshconfig(is_override) {
     displayNone('config_refresh_btn');
     if (!is_override) config_configList = [];
     config_override_List = [];
-    getprinterconfig(is_override_config);
 }
 
 function config_display_override(display_it) {
@@ -37,30 +35,6 @@ function config_display_override(display_it) {
     }
 }
 
-function getprinterconfig(is_override) {
-    var cmd = commandtxt;
-    if ((typeof is_override != 'undefined') && is_override) {
-        cmd = "M503";
-        config_override_List = [];
-        is_override_config = true;
-    } else is_override_config = false;
-    var url = "/command?plain=" + encodeURIComponent(cmd);
-    SendGetHttp(url);
-}
-
-function Apply_config_override() {
-    var url = "/command?plain=" + encodeURIComponent("M500");
-    SendGetHttp(url, getESPUpdateconfigSuccess);
-}
-
-function Delete_config_override() {
-    var url = "/command?plain=" + encodeURIComponent("M502");
-    SendGetHttp(url, getESPUpdateconfigSuccess);
-}
-
-function getESPUpdateconfigSuccess(response) {
-    refreshconfig(true);
-}
 
 function build_HTML_config_list() {
     var content = "";
@@ -97,7 +71,7 @@ function build_HTML_config_list() {
             content += "</td><td>";
             content += "<div class='input-group'>";
             content += "<span class='input-group-addon hide_it' ></span>";
-            content += "<input id='config_" + prefix + i + "' type='text' class='form-control' style='width:";
+            content += "<input autocomplete='off' id='config_" + prefix + i + "' type='text' class='form-control' style='width:";
             content += "auto";
             content += "'  value='" + item.defaultvalue + "' onkeyup='config_checkchange(" + i + "," + is_override_config + ")' />";
             content += "<span id='icon_config_" + prefix + i + "'class='form-control-feedback ico_feedback' ></span>";
@@ -294,8 +268,7 @@ function configGetvalue(index, is_override) {
         id('icon_config_' + prefix + index).className = "form-control-feedback has-success ico_feedback";
         id('icon_config_' + prefix + index).innerHTML = get_icon_svg("ok");
         id('status_config_' + prefix + index).className = "form-group has-feedback has-success";
-        var url = "/command?plain=" + encodeURIComponent(cmd);
-        SendGetHttp(url, setESPconfigSuccess, setESPconfigfailed);
+        firmwareCommand(cmd, setESPconfigSuccess, setESPconfigfailed);
     }
 }
 

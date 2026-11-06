@@ -27,8 +27,17 @@ function showAxiscontrols() {
 
 function loadmacrolist() {
     control_macrolist = [];
+    if (in_ui_dir()) {
+        // Until macros are first saved here, use the shared ones
+        uiFileRead("macrocfg.json", processMacroGetSuccess, loadSharedMacroList);
+    } else {
+        loadSharedMacroList();
+    }
+}
+
+function loadSharedMacroList() {
     var url = "/macrocfg.json";
-    SendGetHttp(url, processMacroGetSuccess, processMacroGetFailed);
+    fileRead(FILE_VOLUME_FLASH, url, processMacroGetSuccess, processMacroGetFailed);
 }
 
 function Macro_build_list(response_text) {
@@ -72,7 +81,7 @@ function processMacroGetSuccess(response) {
 }
 
 function processMacroGetFailed(errorcode, response) {
-    console.log("Error " + errorcode + " : " + response);
+    // console.log("Error " + errorcode + " : " + response);
     Macro_build_list("");
 }
 
@@ -201,7 +210,7 @@ function SendJogcommand(cmd, feedrate) {
         cmd = cmd.replace("Z", letter);
     }
     command = "$J=G91 G21 F" + feedratevalue + " " + cmd;
-    console.log(command);
+    // console.log(command);
     SendPrinterCommand(command, true, get_Position);
 }
 

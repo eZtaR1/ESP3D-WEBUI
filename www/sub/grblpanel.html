@@ -110,10 +110,13 @@
             </table>
             <br>
             <div class="tab" id="grbluitablinks">
-                <button class="tablinks" onclick="opentab(event, 'grblcontroltab', 'grbluitabscontent', 'grbluitablinks')" id="grblcontroltablink">
+                <button class="tablinks" onclick="opentab(event, 'grblpentab', 'grbluitabscontent', 'grbluitablinks')" id="grblpentablink">
+                    <span>Pen</span>
+                </button>
+                <button class="tablinks hide_it" onclick="opentab(event, 'grblcontroltab', 'grbluitabscontent', 'grbluitablinks')" id="grblcontroltablink">
                     <span translate>Override</span>
                 </button>
-                <button class="tablinks" onclick="opentab(event, 'grblspindletab', 'grbluitabscontent', 'grbluitablinks')" id="grblspindletablink">
+                <button class="tablinks hide_it" onclick="opentab(event, 'grblspindletab', 'grbluitabscontent', 'grbluitablinks')" id="grblspindletablink">
                     <span translate>Spindle</span>
                 </button>
                 <button class="tablinks hide_it" onclick="opentab(event, 'grblprobetab', 'grbluitabscontent', 'grbluitablinks')" id="grblprobetablink">
@@ -123,6 +126,44 @@
             <div class="panel panel-default">
                 <div class="panel-body panel-flex-main">
                     <div id="grbluitabscontent">
+                        <div id="grblpentab" class="tabcontent">
+                            <div style="display: flex; gap: 0.5em; justify-content: center; flex-wrap: wrap;">
+                                <button type="button" class="btn btn-default btn-lg" onclick="pen_up()">Pen up (Z<span id="pen_up_z"></span>)</button>
+                                <button type="button" class="btn btn-info btn-lg" onclick="pen_down()">Pen down (Z<span id="pen_down_z"></span>)</button>
+                            </div>
+                            <div style="display: flex; gap: 0.4em; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 0.6em;">
+                                <button type="button" class="btn btn-default" onclick="pen_goto_origin()">Go to X0 Y0</button>
+                                <button type="button" class="btn btn-warning" onclick="pen_change()">Pen change</button>
+                                <label for="pen_park_x">at X</label>
+                                <input autocomplete="off" type="number" class="form-control" style="width: 5em;" id="pen_park_x" value="398">
+                                <label for="pen_park_y">Y</label>
+                                <input autocomplete="off" type="number" class="form-control" style="width: 5em;" id="pen_park_y" value="362">
+                            </div>
+                            <div style="display: flex; gap: 0.4em; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 0.6em;">
+                                <select class="form-control" style="width: 13em;" id="pen_frame_file" onchange="pen_frame_box = null; pen_el('pen_frame_info').textContent = '';"></select>
+                                <button type="button" class="btn btn-default btn-sm" onclick="pen_frame_files()" title="Refresh file list">&#x21bb;</button>
+                                <button type="button" class="btn btn-primary" onclick="pen_frame()">Frame</button>
+                            </div>
+                            <p id="pen_frame_info" style="text-align: center; margin: 0.3em 0 0 0;"></p>
+                            <hr style="margin: 0.6em 0;">
+                            <div style="display: flex; gap: 0.3em; justify-content: center; align-items: center; flex-wrap: wrap;">
+                                <b>Height</b>
+                                <button type="button" class="btn btn-default btn-sm" onclick="pen_jog(-1)">-1</button>
+                                <button type="button" class="btn btn-default btn-sm" onclick="pen_jog(-0.2)">-0.2</button>
+                                <input autocomplete="off" type="number" class="form-control" style="width: 5.5em;" id="pen_jog_z" max="0" step="0.1" onchange="pen_jog_field()">
+                                <span id="pen_jog_pulse"></span>
+                                <button type="button" class="btn btn-default btn-sm" onclick="pen_jog(0.2)">+0.2</button>
+                                <button type="button" class="btn btn-default btn-sm" onclick="pen_jog(1)">+1</button>
+                            </div>
+                            <div style="display: flex; gap: 0.5em; justify-content: center; margin-top: 0.4em;">
+                                <button type="button" class="btn btn-primary btn-sm" onclick="pen_use_as('up')">Use as pen up</button>
+                                <button type="button" class="btn btn-primary btn-sm" onclick="pen_use_as('down')">Use as pen down</button>
+                            </div>
+                            <p style="text-align: center; margin: 0.4em 0 0 0;"><small>
+                                DrawingBot pen down: <code id="pen_code_down"></code> pen up: <code id="pen_code_up"></code>
+                            </small></p>
+                            <p class="pen-status" style="text-align: center; font-weight: bold; margin: 0.4em 0 0 0;"></p>
+                        </div>
                         <div id="grblcontroltab" class="tabcontent">
                             <table width="100%">
                                 <tr>
