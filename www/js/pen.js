@@ -6,19 +6,24 @@
 //     min_pulse_us: 1400
 //     max_pulse_us: 2100
 //
-// "M3 S0" moves the pen up and "M3 S1" moves it down.  The pulse width each
-// one produces comes from min_pulse_us / max_pulse_us / speed_map, and
-// FluidNC only applies those at startup (BESC::init()), so a change has to
-// be written to the config file and the controller restarted before the
-// servo moves to the new position.  This panel does exactly that: it edits
-// only those lines of the config file in place (comments and everything
-// else are left untouched), keeps a one-time backup of the original file,
-// restarts FluidNC, and moves the pen to the position that was just changed.
+// "M3 S0" moves the pen up and "M3 S1" moves it down.  FluidNC only applies
+// min_pulse_us / max_pulse_us / speed_map at startup, so changing them needs
+// a restart.  To test positions live, the panel has a calibration mode:
+//
+//   min_pulse_us: 500, max_pulse_us: 2500
+//   speed_map: 0=<up>% 1=<down>% 2=0.00% 2002=100.00%
+//
+// S0 and S1 still give the current up/down positions, and S2..S2002 give a
+// pulse of exactly (S - 2 + 500) us, so any test value is just "M3 S<n>".
+// Entering and leaving calibration mode each take one restart.  Only those
+// lines of the config file are edited (comments and everything else are left
+// untouched) and a one-time .bak of the original is kept.
 
 var pen_up_cmd = "M3 S0";
 var pen_down_cmd = "M3 S1";
-var pen_min_us = 500;
+var pen_min_us = 500;          // calibration range
 var pen_max_us = 2500;
+var pen_cal_base = 2;          // S value for pen_min_us in calibration mode
 var pen_cfg = null;           // last parsed config: {text, up_us, down_us, ...}
 var pen_backup_done = false;
 
@@ -157,8 +162,38 @@ function pen_parse(text) {
         speed_map: speedMap,
         up_us: Math.round(minUs + (maxUs - minUs) * pUp / 100),
         down_us: Math.round(minUs + (maxUs - minUs) * pDown / 100),
-        simple: (pUp === 0 || pUp === 100) && (pDown === 0 || pDown === 100) && pUp !== pDown
+        simple: (pUp === 0 || pUp === 100) && (pDown === 0 || pDown === 100) && pUp !== pDown,
+        calibrating: minUs === pen_min_us && maxUs === pen_max_us && pen_is_cal_map(speedMap)
     };
+}
+
+function pen_is_cal_map(speedMap) {
+    var toks = speedMap.trim().split(/\s+/);
+    if (toks.length !== 4) return false;
+    var p2 = toks[2].match(/^(\d+)=([\d.]+)%?$/);
+    var p3 = toks[3].match(/^(\d+)=([\d.]+)%?$/);
+    return !!(p2 && p3 && parseInt(p2[1], 10) === pen_cal_base && parseFloat(p2[2]) === 0 &&
+        parseInt(p3[1], 10) === pen_cal_base + (pen_max_us - pen_min_us) && parseFloat(p3[2]) === 100);
+}
+
+function pen_cal_percent(us) {
+    return (100 * (us - pen_min_us) / (pen_max_us - pen_min_us)).toFixed(2) + "%";
+}
+
+// S value that produces a pulse of us microseconds in calibration mode
+function pen_cal_speed(us) {
+    return pen_cal_base + Math.round(us - pen_min_us);
+}
+
+// Config text for calibration mode, keeping S0/S1 at the given positions.
+function pen_build_cal(cfg, upUs, downUs) {
+    var lines = cfg.text.split(/\r?\n/);
+    var sec = pen_find_section(lines, pen_section_name());
+    pen_set_key(lines, sec, "min_pulse_us", String(pen_min_us));
+    pen_set_key(lines, sec, "max_pulse_us", String(pen_max_us));
+    pen_set_key(lines, sec, "speed_map", "0=" + pen_cal_percent(upUs) + " 1=" + pen_cal_percent(downUs) +
+        " " + pen_cal_base + "=0.00% " + pen_cal_speed(pen_max_us) + "=100.00%");
+    return lines.join(cfg.crlf ? "\r\n" : "\n");
 }
 
 // Produces the new config text with the given up/down pulse widths.
@@ -173,7 +208,7 @@ function pen_build(cfg, upUs, downUs) {
     pen_set_key(lines, sec, "max_pulse_us", String(hi));
     var upIsHigh = upUs > downUs;
     var curUpIsHigh = pen_map_percent(cfg.speed_map, 0) > pen_map_percent(cfg.speed_map, 1);
-    if (!cfg.simple || upIsHigh !== curUpIsHigh) {
+    if (!cfg.simple || cfg.calibrating || upIsHigh !== curUpIsHigh) {
         pen_set_key(lines, sec, "speed_map", upIsHigh ? "0=100.00% 1=0.00%" : "0=0.00% 1=100.00%");
     }
     return lines.join(cfg.crlf ? "\r\n" : "\n");
@@ -208,15 +243,19 @@ function pen_write_file(name, text, successfn) {
 
 function pen_show(cfg) {
     pen_cfg = cfg;
-    pen_el("pen_up_us").value = cfg.up_us;
-    pen_el("pen_down_us").value = cfg.down_us;
-    pen_el("pen_current").textContent = "In " + pen_config_name() + ": up " + cfg.up_us +
+    pen_el("pen_current").textContent = "Saved in " + pen_config_name() + ": up " + cfg.up_us +
         " us (S0), down " + cfg.down_us + " us (S1)";
+    pen_el("pen_cal_on").style.display = cfg.calibrating ? "" : "none";
+    pen_el("pen_cal_off").style.display = cfg.calibrating ? "none" : "";
+    if (!pen_el("pen_up_us").value) pen_el("pen_up_us").value = cfg.up_us;
+    if (!pen_el("pen_down_us").value) pen_el("pen_down_us").value = cfg.down_us;
 }
 
 function pen_load() {
     pen_status("Reading " + pen_config_name() + "...");
     pen_read_config(function(cfg) {
+        pen_el("pen_up_us").value = "";
+        pen_el("pen_down_us").value = "";
         pen_show(cfg);
         pen_status("");
     });
@@ -228,10 +267,24 @@ function pen_value(which) {
     return Math.max(pen_min_us, Math.min(pen_max_us, v));
 }
 
+// Moves the servo to the value in the up/down field (calibration mode only)
+function pen_test(which) {
+    var v = pen_value(which);
+    if (v === null) return;
+    pen_el("pen_" + which + "_us").value = v;
+    if (!pen_cfg || !pen_cfg.calibrating) {
+        pen_status("Start calibration first", true);
+        return;
+    }
+    SendPrinterCommand("M3 S" + pen_cal_speed(v), true);
+    pen_status("Pen at " + v + " us (testing " + which + ")");
+}
+
 function pen_nudge(which, delta) {
     var v = pen_value(which);
     if (v === null) v = 1500;
     pen_el("pen_" + which + "_us").value = Math.max(pen_min_us, Math.min(pen_max_us, v + delta));
+    pen_test(which);
 }
 
 function pen_machine_busy() {
@@ -240,18 +293,9 @@ function pen_machine_busy() {
     return !(s === "Idle" || s === "Alarm" || s === "Sleep");
 }
 
-// which: "up" or "down" -- the position to move to after the restart.
-function pen_apply(which) {
-    var upUs = pen_value("up");
-    var downUs = pen_value("down");
-    if (upUs === null || downUs === null) {
-        pen_status("Enter both pulse widths", true);
-        return;
-    }
-    if (upUs === downUs) {
-        pen_status("Up and down must be different", true);
-        return;
-    }
+// Writes newText (made from the freshly read config by buildfn), verifies it,
+// restarts FluidNC and moves the pen to `after` ("up"/"down") once back.
+function pen_rewrite(buildfn, verifyfn, after, what) {
     if (pen_machine_busy()) {
         pen_status("Machine is " + grblstate.stateName + " - wait until it is idle", true);
         return;
@@ -259,28 +303,23 @@ function pen_apply(which) {
     var name = pen_config_name();
     pen_status("Reading " + name + "...");
     pen_read_config(function(cfg) {
-        if (cfg.up_us === upUs && cfg.down_us === downUs) {
-            pen_status("No change - moving pen " + which);
-            if (which === "up") pen_up(); else pen_down();
-            return;
-        }
-        var newText = pen_build(cfg, upUs, downUs);
+        var newText = buildfn(cfg);
         var write = function() {
             pen_status("Writing " + name + "...");
             pen_write_file(name, newText, function() {
                 // Read it back to make sure the file on the controller is what we sent
                 pen_read_config(function(check) {
-                    if (check.up_us !== upUs || check.down_us !== downUs) {
-                        pen_status("Verify failed: " + name + " has up " + check.up_us + " / down " + check.down_us, true);
+                    if (!verifyfn(check)) {
+                        pen_status("Verify failed - " + name + " was not written as expected", true);
                         return;
                     }
-                    store_localdata("pen_after_restart", which);
-                    pen_status("Saved. Restarting FluidNC...");
+                    store_localdata("pen_after_restart", after);
+                    pen_status(what + " Restarting FluidNC...");
                     restartdlg();
                 });
             });
         };
-        if (pen_backup_done) {
+        if (pen_backup_done || cfg.calibrating) {
             write();
         } else {
             pen_status("Backing up " + name + " to " + name + ".bak...");
@@ -290,6 +329,39 @@ function pen_apply(which) {
             });
         }
     });
+}
+
+function pen_cal_start() {
+    pen_rewrite(function(cfg) {
+        return pen_build_cal(cfg, cfg.up_us, cfg.down_us);
+    }, function(check) {
+        return check.calibrating;
+    }, "up", "Calibration mode saved.");
+}
+
+// keep: true saves the up/down fields, false restores the S0/S1 values
+function pen_cal_finish(keep) {
+    var upUs = pen_value("up");
+    var downUs = pen_value("down");
+    if (keep) {
+        if (upUs === null || downUs === null) {
+            pen_status("Enter both pulse widths", true);
+            return;
+        }
+        if (upUs === downUs) {
+            pen_status("Up and down must be different", true);
+            return;
+        }
+    }
+    pen_rewrite(function(cfg) {
+        if (!keep) {
+            upUs = cfg.up_us;
+            downUs = cfg.down_us;
+        }
+        return pen_build(cfg, upUs, downUs);
+    }, function(check) {
+        return !check.calibrating && check.up_us === upUs && check.down_us === downUs;
+    }, "up", keep ? "New positions saved." : "Original positions restored.");
 }
 
 function pen_save_settings() {
@@ -307,13 +379,12 @@ function init_pen_panel() {
     var after = get_localdata("pen_after_restart");
     if (after === "up" || after === "down") {
         delete_localdata("pen_after_restart");
-        displayBlock("pentab");
         var link = pen_el("pentablink");
         if (link) link.click();
         // give the controller a moment after the reload before moving the pen
         setTimeout(function() {
             if (after === "up") pen_up(); else pen_down();
-            pen_status("Restarted with new values - pen moved " + after);
+            pen_status("Restarted - pen moved " + after);
         }, 1500);
     }
 }
