@@ -1,0 +1,25 @@
+{
+  "presetType": "gcode_settings",
+  "version": "1",
+  "presetSubType": "System",
+  "presetName": "plotbot-z",
+  "enabled": true,
+  "userCreated": true,
+  "data": {
+    "settings": {
+      "gcodeCommentType": "None",
+      "gcodePenDownCode": "G53 G0 Z-7",
+      "gcodeStartLayerCode": "",
+      "gcodeStartCode": "G21\nG90\nG53 G0 Z0\n$H\nG1 F2000",
+      "gcodeEndCode": "G53 G0 Z0\n$H\n",
+      "gcodeOffsetY": "0.0",
+      "gcodeOffsetX": "0.0",
+      "gcodeEnableFlattening": "true",
+      "gcodeEndLayerCode": "",
+      "gcodeUnits": "mm",
+      "gcodePenUpCode": "G53 G0 Z0",
+      "gcodeCenterZeroPoint": "false",
+      "gcodeCurveFlatness": "0.1"
+    }
+  }
+}

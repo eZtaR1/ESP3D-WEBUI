@@ -3,17 +3,16 @@
         <div class="panel-heading"><b>Pen</b></div>
         <div class="panel-body">
             <div style="display: flex; gap: 1em; justify-content: center; margin-bottom: 0.5em;">
-                <button type="button" class="btn btn-default btn-lg" onclick="pen_up()">Pen up (M3 S0)</button>
-                <button type="button" class="btn btn-info btn-lg" onclick="pen_down()">Pen down (M3 S1)</button>
+                <button type="button" class="btn btn-default btn-lg" onclick="pen_up()">Pen up (Z<span id="pen_up_z"></span>)</button>
+                <button type="button" class="btn btn-info btn-lg" onclick="pen_down()">Pen down (Z<span id="pen_down_z"></span>)</button>
             </div>
-            <p id="pen_current" style="text-align: center; margin: 0;"></p>
             <div style="display: flex; gap: 0.5em; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 0.8em;">
                 <button type="button" class="btn btn-default" onclick="pen_goto_origin()">Go to X0 Y0</button>
                 <button type="button" class="btn btn-warning" onclick="pen_change()">Pen change</button>
                 <label for="pen_park_x">at machine X</label>
-                <input autocomplete="off" type="number" class="form-control" style="width: 5.5em;" id="pen_park_x" value="398" onchange="pen_save_settings()">
+                <input autocomplete="off" type="number" class="form-control" style="width: 5.5em;" id="pen_park_x" value="398">
                 <label for="pen_park_y">Y</label>
-                <input autocomplete="off" type="number" class="form-control" style="width: 5.5em;" id="pen_park_y" value="362" onchange="pen_save_settings()">
+                <input autocomplete="off" type="number" class="form-control" style="width: 5.5em;" id="pen_park_y" value="362">
             </div>
             <div style="display: flex; gap: 0.5em; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 0.8em;">
                 <label for="pen_frame_file">Frame</label>
@@ -22,80 +21,72 @@
                 <button type="button" class="btn btn-primary" onclick="pen_frame()">Frame (pen up)</button>
             </div>
             <p id="pen_frame_info" style="text-align: center; margin: 0.3em 0 0 0;"></p>
+            <p id="pen_status" style="text-align: center; font-weight: bold; margin: 0.5em 0 0 0;"></p>
         </div>
     </div>
 
     <div class="panel panel-default" style="max-width: 40em; margin: 1em auto;">
-        <div class="panel-heading"><b>Plotter settings</b></div>
+        <div class="panel-heading"><b>Pen heights</b> <small>(moves live)</small></div>
+        <div class="panel-body">
+            <div style="display: flex; gap: 0.4em; justify-content: center; align-items: center; flex-wrap: wrap;">
+                <button type="button" class="btn btn-default btn-sm" onclick="pen_jog(-1)">-1</button>
+                <button type="button" class="btn btn-default btn-sm" onclick="pen_jog(-0.2)">-0.2</button>
+                <label for="pen_jog_z">Z</label>
+                <input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_jog_z" max="0" step="0.1" onchange="pen_jog_field()">
+                <span id="pen_jog_pulse"></span>
+                <button type="button" class="btn btn-default btn-sm" onclick="pen_jog(0.2)">+0.2</button>
+                <button type="button" class="btn btn-default btn-sm" onclick="pen_jog(1)">+1</button>
+            </div>
+            <div style="display: flex; gap: 1em; justify-content: center; margin-top: 0.6em;">
+                <button type="button" class="btn btn-primary" onclick="pen_use_as('up')">Use as pen up</button>
+                <button type="button" class="btn btn-primary" onclick="pen_use_as('down')">Use as pen down</button>
+            </div>
+            <p style="text-align: center; margin: 0.6em 0 0 0;"><small>
+                Saved to <i>pen.json</i>, <i>macro1.g</i> (down) and <i>macro2.g</i> (up).
+                DrawingBot pen down code: <code id="pen_code_down"></code>, pen up code: <code id="pen_code_up"></code>
+            </small></p>
+        </div>
+    </div>
+
+    <div class="panel panel-default" style="max-width: 40em; margin: 1em auto;">
+        <div class="panel-heading"><b>Servo &amp; plotter settings</b></div>
         <div class="panel-body">
             <table style="margin: 0 auto; border-spacing: 0.4em; border-collapse: separate;">
                 <tr>
-                    <td><label for="pen_spinup_ms">Pen down settle</label></td>
-                    <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_spinup_ms" min="0" max="5000" step="10"></td>
-                    <td>ms <small>(spinup_ms - raise if lines start with a blob or tail, try 150-250)</small></td>
+                    <td><label for="pen_max_pulse">Pulse at Z0</label></td>
+                    <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_max_pulse" min="500" max="2500" step="10"></td>
+                    <td>us <small>(max_pulse_us - top of the range)</small></td>
                 </tr>
                 <tr>
-                    <td><label for="pen_spindown_ms">Pen up settle</label></td>
-                    <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_spindown_ms" min="0" max="5000" step="10"></td>
-                    <td>ms <small>(spindown_ms - lower until lines drag at the end)</small></td>
+                    <td><label for="pen_min_pulse">Pulse at bottom</label></td>
+                    <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_min_pulse" min="500" max="2500" step="10"></td>
+                    <td>us <small>(min_pulse_us - at Z minus travel)</small></td>
+                </tr>
+                <tr>
+                    <td><label for="pen_z_travel">Z travel</label></td>
+                    <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_z_travel" min="1" max="100"></td>
+                    <td>mm <small>(max_travel_mm - restart needed)</small></td>
+                </tr>
+                <tr>
+                    <td><label for="pen_z_rate">Pen speed</label></td>
+                    <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_z_rate" min="10" step="100"></td>
+                    <td>mm/min <small>(Z max_rate - lower for a softer landing)</small></td>
                 </tr>
                 <tr>
                     <td><label for="pen_planner_blocks">Planner blocks</label></td>
                     <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_planner_blocks" min="10" max="120"></td>
-                    <td><small>(planner_blocks - lookahead for smooth curves, try 32-64)</small></td>
+                    <td><small>(planner_blocks - lookahead, try 32-64; restart needed)</small></td>
                 </tr>
             </table>
             <div style="text-align: center;">
-                <button type="button" class="btn btn-primary" onclick="pen_settings_save()">Save &amp; restart</button>
+                <button type="button" class="btn btn-primary" onclick="pen_settings_save()">Save</button>
             </div>
-        </div>
-    </div>
-
-    <div class="panel panel-default" style="max-width: 40em; margin: 1em auto;">
-        <div class="panel-heading"><b>Calibrate servo</b></div>
-        <div class="panel-body">
-            <div id="pen_cal_off" style="text-align: center;">
-                <p>Calibration mode lets you try pulse widths live. Entering it and saving at the end each take one restart.</p>
-                <button type="button" class="btn btn-primary" onclick="pen_cal_start()">Start calibration</button>
-            </div>
-            <div id="pen_cal_on" style="display: none;">
-                <p style="text-align: center; color: #8a6d3b; background: #fcf8e3; padding: 0.4em;">
-                    Calibration mode is on. Values move the pen immediately. Don't plot until you finish.
-                </p>
-                <table style="margin: 0 auto; border-spacing: 0.4em; border-collapse: separate;">
-                    <tr>
-                        <td><b>Up</b> (us)</td>
-                        <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('up', -50)">-50</button></td>
-                        <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('up', -10)">-10</button></td>
-                        <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_up_us" min="500" max="2500" step="10" onchange="pen_test('up')"></td>
-                        <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('up', 10)">+10</button></td>
-                        <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('up', 50)">+50</button></td>
-                        <td><button type="button" class="btn btn-info btn-sm" onclick="pen_test('up')">Test up</button></td>
-                    </tr>
-                    <tr>
-                        <td><b>Down</b> (us)</td>
-                        <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('down', -50)">-50</button></td>
-                        <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('down', -10)">-10</button></td>
-                        <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_down_us" min="500" max="2500" step="10" onchange="pen_test('down')"></td>
-                        <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('down', 10)">+10</button></td>
-                        <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('down', 50)">+50</button></td>
-                        <td><button type="button" class="btn btn-info btn-sm" onclick="pen_test('down')">Test down</button></td>
-                    </tr>
-                </table>
-                <div style="display: flex; gap: 1em; justify-content: center; margin-top: 0.5em;">
-                    <button type="button" class="btn btn-primary" onclick="pen_cal_finish(true)">Save these values</button>
-                    <button type="button" class="btn btn-default" onclick="pen_cal_finish(false)">Cancel</button>
-                </div>
-            </div>
-            <p id="pen_status" style="text-align: center; font-weight: bold; margin-top: 0.5em;"></p>
-            <div style="display: flex; gap: 0.5em; justify-content: center; align-items: center; flex-wrap: wrap;">
+            <div style="display: flex; gap: 0.5em; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 0.8em;">
                 <label for="pen_config_file">Config file</label>
                 <input autocomplete="off" type="text" class="form-control" style="width: 10em;" id="pen_config_file" value="config.yaml" onchange="pen_save_settings()">
-                <label for="pen_section">Spindle</label>
-                <input autocomplete="off" type="text" class="form-control" style="width: 6em;" id="pen_section" value="BESC" onchange="pen_save_settings()">
                 <button type="button" class="btn btn-default btn-sm" onclick="pen_load()">Reload</button>
             </div>
-            <p style="text-align: center; margin-top: 0.5em;"><small>Only the pulse lines in the config file are changed.
+            <p style="text-align: center; margin-top: 0.5em;"><small>Only these lines in the config file are changed.
                 The original file is saved once as <i>.bak</i>.</small></p>
         </div>
     </div>

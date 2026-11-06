@@ -1,31 +1,42 @@
-// Pen (servo) panel for FluidNC pen plotters that lift the pen with a
-// BESC-type servo spindle, e.g.
+// Pen panel for FluidNC pen plotters whose pen is lifted by an RC servo
+// driven as the Z axis:
 //
-//   BESC:
-//     speed_map: 0=100.00% 1=0.00%
-//     min_pulse_us: 1400
-//     max_pulse_us: 2100
+//   axes:
+//     z:
+//       max_rate_mm_per_min: 2400     <- pen up/down speed
+//       max_travel_mm: 8              <- Z range is -8 .. 0
+//       soft_limits: true
+//       motor0:
+//         rc_servo:
+//           output_pin: gpio.22
+//           min_pulse_us: 1300        <- pulse at Z-8
+//           max_pulse_us: 2100        <- pulse at Z0
 //
-// "M3 S0" moves the pen up and "M3 S1" moves it down.  FluidNC only applies
-// min_pulse_us / max_pulse_us / speed_map at startup, so changing them needs
-// a restart.  To test positions live, the panel has a calibration mode:
+// Z is a machine position that maps linearly onto the servo pulse, so pen
+// heights are just Z values: "G53 G0 Z0" (up), "G53 G0 Z-7" (down).  G53
+// keeps them independent of any work offset, and G0 avoids touching the
+// modal feed rate, so the pen moves at the Z max rate.
 //
-//   min_pulse_us: 500, max_pulse_us: 2500
-//   speed_map: 0=<up>% 1=<down>% 2=0.00% 2002=100.00%
-//
-// S0 and S1 still give the current up/down positions, and S2..S2002 give a
-// pulse of exactly (S - 2 + 500) us, so any test value is just "M3 S<n>".
-// Entering and leaving calibration mode each take one restart.  Only those
-// lines of the config file are edited (comments and everything else are left
-// untouched) and a one-time .bak of the original is kept.
+// Pen heights live in pen.json on the controller and are also written to
+// macro1.g (down) / macro2.g (up) so the dashboard macro buttons match.
+// The servo pulse range and Z speed are applied live with $/ settings and
+// also written into the config file in place (comments and all other lines
+// untouched, one-time .bak of the original); only max_travel_mm and
+// planner_blocks need a restart.
 
-var pen_up_cmd = "M3 S0";
-var pen_down_cmd = "M3 S1";
-var pen_min_us = 500;          // calibration range
-var pen_max_us = 2500;
-var pen_cal_base = 2;          // S value for pen_min_us in calibration mode
-var pen_cfg = null;           // last parsed config: {text, up_us, down_us, ...}
+var pen = {
+    up_z: 0,
+    down_z: -7,
+    park_x: 398,
+    park_y: 362
+};
+var pen_state_file = "pen.json";
+var pen_down_macro = "macro1.g";
+var pen_up_macro = "macro2.g";
+var pen_cfg = null;           // last parsed config
 var pen_backup_done = false;
+var pen_jog_z = 0;            // last Z sent from the height panel
+var pen_frame_box = null;
 
 function pen_el(name) {
     return document.getElementById(name);
@@ -44,17 +55,24 @@ function pen_config_name() {
     return v.replace(/^\/+/, "");
 }
 
-function pen_section_name() {
-    var v = pen_el("pen_section") ? pen_el("pen_section").value.trim() : "";
-    return v === "" ? "BESC" : v;
+function pen_fmt(z) {
+    return String(Math.round(z * 1000) / 1000);
+}
+
+function pen_up_cmd() {
+    return "G53 G0 Z" + pen_fmt(pen.up_z);
+}
+
+function pen_down_cmd() {
+    return "G53 G0 Z" + pen_fmt(pen.down_z);
 }
 
 function pen_up() {
-    SendPrinterCommand(pen_up_cmd, true);
+    SendPrinterCommand(pen_up_cmd(), true);
 }
 
 function pen_down() {
-    SendPrinterCommand(pen_down_cmd, true);
+    SendPrinterCommand(pen_down_cmd(), true);
 }
 
 // ---- config parsing / editing --------------------------------------------
@@ -67,17 +85,21 @@ function pen_is_blank(line) {
     return /^\s*(#.*)?$/.test(line);
 }
 
-// Returns {start, end, childIndent} for the section's lines (start = header
-// line index, end = one past its last child line), or null.
-function pen_find_section(lines, section) {
-    var header = new RegExp("^([ \\t]*)" + section.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ":\\s*(#.*)?$");
-    for (var i = 0; i < lines.length; i++) {
+function pen_escape(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Finds "name:" with nothing after it between lines [from, to) at an
+// indent greater than minIndent.  Returns {start, end, base, childIndent}.
+function pen_find_block(lines, name, from, to, minIndent) {
+    var header = new RegExp("^([ \\t]*)" + pen_escape(name) + ":\\s*(#.*)?$");
+    for (var i = from; i < to; i++) {
         var m = lines[i].match(header);
-        if (!m) continue;
+        if (!m || m[1].length <= minIndent) continue;
         var base = m[1].length;
         var end = i + 1;
         var childIndent = -1;
-        for (var j = i + 1; j < lines.length; j++) {
+        for (var j = i + 1; j < to; j++) {
             if (pen_is_blank(lines[j])) continue;
             var ind = pen_indent(lines[j]);
             if (ind <= base) break;
@@ -85,36 +107,49 @@ function pen_find_section(lines, section) {
             end = j + 1;
         }
         if (childIndent < 0) childIndent = base + 2;
-        return { start: i, end: end, childIndent: childIndent };
+        return { start: i, end: end, base: base, childIndent: childIndent };
     }
     return null;
+}
+
+// path like ["axes", "z", "motor0", "rc_servo"]
+function pen_find_path(lines, path) {
+    var from = 0, to = lines.length, minIndent = -1, blk = null;
+    for (var k = 0; k < path.length; k++) {
+        blk = pen_find_block(lines, path[k], from, to, minIndent);
+        if (!blk) return null;
+        from = blk.start + 1;
+        to = blk.end;
+        minIndent = blk.base;
+    }
+    return blk;
 }
 
 function pen_key_regex(key, indent) {
     return new RegExp("^([ \\t]{" + indent + "}" + key + ":[ \\t]*)([^#\\r\\n]*?)([ \\t]*#.*)?$");
 }
 
-function pen_get_key(lines, sec, key) {
-    var re = pen_key_regex(key, sec.childIndent);
-    for (var i = sec.start + 1; i < sec.end; i++) {
+function pen_get_key(lines, blk, key) {
+    var re = pen_key_regex(key, blk.childIndent);
+    for (var i = blk.start + 1; i < blk.end; i++) {
         var m = lines[i].match(re);
-        if (m) return { index: i, value: m[2].trim() };
+        if (m) return m[2].trim();
     }
     return null;
 }
 
-function pen_set_key(lines, sec, key, value) {
-    var re = pen_key_regex(key, sec.childIndent);
-    for (var i = sec.start + 1; i < sec.end; i++) {
+function pen_set_key(lines, blk, key, value) {
+    var re = pen_key_regex(key, blk.childIndent);
+    for (var i = blk.start + 1; i < blk.end; i++) {
         var m = lines[i].match(re);
         if (m) {
             lines[i] = m[1] + value + (m[3] || "");
             return;
         }
     }
-    var pad = new Array(sec.childIndent + 1).join(" ");
-    lines.splice(sec.end, 0, pad + key + ": " + value);
-    sec.end++;
+    var pad = new Array(blk.childIndent + 1).join(" ");
+    lines.splice(blk.start + 1, 0, pad + key + ": " + value);
+    blk.end++;
 }
 
 // Top-level (unindented) key such as planner_blocks
@@ -122,7 +157,7 @@ function pen_get_top_key(lines, key) {
     var re = pen_key_regex(key, 0);
     for (var i = 0; i < lines.length; i++) {
         var m = lines[i].match(re);
-        if (m) return { index: i, value: m[2].trim() };
+        if (m) return m[2].trim();
     }
     return null;
 }
@@ -141,107 +176,45 @@ function pen_set_top_key(lines, key, value) {
     lines.splice(end, 0, key + ": " + value);
 }
 
-// Percent of the [min,max] pulse range that speed S maps to, by linear
-// interpolation of speed_map ("0=100.00% 1=0.00%" style).  Speeds outside
-// the map clamp to its end points.
-function pen_map_percent(speedMap, s) {
-    var pts = [];
-    speedMap.split(/\s+/).forEach(function(tok) {
-        var m = tok.match(/^(-?[\d.]+)=(-?[\d.]+)%?$/);
-        if (m) pts.push([parseFloat(m[1]), parseFloat(m[2])]);
-    });
-    if (pts.length === 0) return null;
-    pts.sort(function(a, b) { return a[0] - b[0]; });
-    if (s <= pts[0][0]) return pts[0][1];
-    for (var i = 1; i < pts.length; i++) {
-        if (s <= pts[i][0]) {
-            var a = pts[i - 1], b = pts[i];
-            return a[1] + (b[1] - a[1]) * (s - a[0]) / (b[0] - a[0]);
-        }
-    }
-    return pts[pts.length - 1][1];
+function pen_num(v, dflt) {
+    var n = parseFloat(v);
+    return isNaN(n) ? dflt : n;
 }
 
 function pen_parse(text) {
-    var section = pen_section_name();
     var lines = text.split(/\r?\n/);
-    var sec = pen_find_section(lines, section);
-    if (!sec) throw new Error("No '" + section + ":' section found in " + pen_config_name());
-    var minK = pen_get_key(lines, sec, "min_pulse_us");
-    var maxK = pen_get_key(lines, sec, "max_pulse_us");
-    var mapK = pen_get_key(lines, sec, "speed_map");
-    var minUs = minK ? parseFloat(minK.value) : 900;   // FluidNC defaults
-    var maxUs = maxK ? parseFloat(maxK.value) : 2200;
-    var speedMap = mapK ? mapK.value : "";
-    var upK = pen_get_key(lines, sec, "spinup_ms");
-    var dnK = pen_get_key(lines, sec, "spindown_ms");
-    var pbK = pen_get_top_key(lines, "planner_blocks");
-    var pUp = speedMap ? pen_map_percent(speedMap, 0) : null;
-    var pDown = speedMap ? pen_map_percent(speedMap, 1) : null;
-    if (pUp === null || pDown === null) {
-        throw new Error("Could not read speed_map in the " + section + " section");
-    }
+    var z = pen_find_path(lines, ["axes", "z"]);
+    var servo = pen_find_path(lines, ["axes", "z", "motor0", "rc_servo"]);
+    if (!z || !servo) throw new Error("No Z axis rc_servo in " + pen_config_name());
     return {
         text: text,
         crlf: /\r\n/.test(text),
-        min_us: minUs,
-        max_us: maxUs,
-        speed_map: speedMap,
-        up_us: Math.round(minUs + (maxUs - minUs) * pUp / 100),
-        down_us: Math.round(minUs + (maxUs - minUs) * pDown / 100),
-        simple: (pUp === 0 || pUp === 100) && (pDown === 0 || pDown === 100) && pUp !== pDown,
-        spinup_ms: upK ? parseInt(upK.value, 10) : 0,
-        spindown_ms: dnK ? parseInt(dnK.value, 10) : 0,
-        planner_blocks: pbK ? parseInt(pbK.value, 10) : 16,
-        calibrating: minUs === pen_min_us && maxUs === pen_max_us && pen_is_cal_map(speedMap)
+        min_pulse_us: pen_num(pen_get_key(lines, servo, "min_pulse_us"), 1000),   // FluidNC defaults
+        max_pulse_us: pen_num(pen_get_key(lines, servo, "max_pulse_us"), 2000),
+        z_travel: pen_num(pen_get_key(lines, z, "max_travel_mm"), 1000),
+        z_rate: pen_num(pen_get_key(lines, z, "max_rate_mm_per_min"), 1000),
+        planner_blocks: pen_num(pen_get_top_key(lines, "planner_blocks"), 16)
     };
 }
 
-function pen_is_cal_map(speedMap) {
-    var toks = speedMap.trim().split(/\s+/);
-    if (toks.length !== 4) return false;
-    var p2 = toks[2].match(/^(\d+)=([\d.]+)%?$/);
-    var p3 = toks[3].match(/^(\d+)=([\d.]+)%?$/);
-    return !!(p2 && p3 && parseInt(p2[1], 10) === pen_cal_base && parseFloat(p2[2]) === 0 &&
-        parseInt(p3[1], 10) === pen_cal_base + (pen_max_us - pen_min_us) && parseFloat(p3[2]) === 100);
-}
-
-function pen_cal_percent(us) {
-    return (100 * (us - pen_min_us) / (pen_max_us - pen_min_us)).toFixed(2) + "%";
-}
-
-// S value that produces a pulse of us microseconds in calibration mode
-function pen_cal_speed(us) {
-    return pen_cal_base + Math.round(us - pen_min_us);
-}
-
-// Config text for calibration mode, keeping S0/S1 at the given positions.
-function pen_build_cal(cfg, upUs, downUs) {
+function pen_build(cfg, v) {
     var lines = cfg.text.split(/\r?\n/);
-    var sec = pen_find_section(lines, pen_section_name());
-    pen_set_key(lines, sec, "min_pulse_us", String(pen_min_us));
-    pen_set_key(lines, sec, "max_pulse_us", String(pen_max_us));
-    pen_set_key(lines, sec, "speed_map", "0=" + pen_cal_percent(upUs) + " 1=" + pen_cal_percent(downUs) +
-        " " + pen_cal_base + "=0.00% " + pen_cal_speed(pen_max_us) + "=100.00%");
+    var servo = pen_find_path(lines, ["axes", "z", "motor0", "rc_servo"]);
+    pen_set_key(lines, servo, "min_pulse_us", String(v.min_pulse_us));
+    pen_set_key(lines, servo, "max_pulse_us", String(v.max_pulse_us));
+    var z = pen_find_path(lines, ["axes", "z"]);
+    pen_set_key(lines, z, "max_rate_mm_per_min", v.z_rate.toFixed(6));
+    pen_set_key(lines, z, "max_travel_mm", v.z_travel.toFixed(6));
+    pen_set_top_key(lines, "planner_blocks", String(v.planner_blocks));
     return lines.join(cfg.crlf ? "\r\n" : "\n");
 }
 
-// Produces the new config text with the given up/down pulse widths.
-// min_pulse_us/max_pulse_us get the lower/higher value (BESC needs
-// min < max); speed_map is only rewritten if S0/S1 need to swap ends.
-function pen_build(cfg, upUs, downUs) {
-    var lines = cfg.text.split(/\r?\n/);
-    var sec = pen_find_section(lines, pen_section_name());
-    var lo = Math.min(upUs, downUs);
-    var hi = Math.max(upUs, downUs);
-    pen_set_key(lines, sec, "min_pulse_us", String(lo));
-    pen_set_key(lines, sec, "max_pulse_us", String(hi));
-    var upIsHigh = upUs > downUs;
-    var curUpIsHigh = pen_map_percent(cfg.speed_map, 0) > pen_map_percent(cfg.speed_map, 1);
-    if (!cfg.simple || cfg.calibrating || upIsHigh !== curUpIsHigh) {
-        pen_set_key(lines, sec, "speed_map", upIsHigh ? "0=100.00% 1=0.00%" : "0=0.00% 1=100.00%");
-    }
-    return lines.join(cfg.crlf ? "\r\n" : "\n");
+// Pulse width the servo gets at machine Z (same mapping as RcServo.cpp)
+function pen_pulse_at(z) {
+    if (!pen_cfg) return null;
+    var t = pen_cfg.z_travel;
+    var f = Math.max(0, Math.min(1, (z + t) / t));
+    return Math.round(pen_cfg.min_pulse_us + (pen_cfg.max_pulse_us - pen_cfg.min_pulse_us) * f);
 }
 
 // ---- file I/O --------------------------------------------------------------
@@ -257,67 +230,81 @@ function pen_read_config(successfn) {
             return;
         }
         successfn(cfg);
-    }, function(code, resp) {
+    }, function(code) {
         pen_status("Could not read " + name + " (" + code + ")", true);
     });
 }
 
 function pen_write_file(name, text, successfn) {
     var file = new File([new Blob([text], { type: "text/plain" })], name);
-    fileUpload(FILE_VOLUME_FLASH, "/", [file], null, successfn, function(code, resp) {
+    fileUpload(FILE_VOLUME_FLASH, "/", [file], null, successfn, function(code) {
         pen_status("Could not write " + name + " (" + code + ")", true);
+    });
+}
+
+function pen_load_state(successfn) {
+    fileRead(FILE_VOLUME_FLASH, "/" + pen_state_file + "?t=" + Date.now(), function(text) {
+        try {
+            var d = JSON.parse(text);
+            ["up_z", "down_z", "park_x", "park_y"].forEach(function(k) {
+                if (typeof d[k] === "number") pen[k] = d[k];
+            });
+        } catch (e) {
+            console.log("Invalid " + pen_state_file);
+        }
+        successfn();
+    }, function() {
+        successfn();   // not there yet: defaults
+    });
+}
+
+// Saves pen.json and the pen up/down macro files
+function pen_save_state(successfn) {
+    pen_write_file(pen_state_file, JSON.stringify(pen, null, 1), function() {
+        pen_write_file(pen_down_macro, pen_down_cmd() + "\n", function() {
+            pen_write_file(pen_up_macro, pen_up_cmd() + "\n", function() {
+                if (successfn) successfn();
+            });
+        });
     });
 }
 
 // ---- UI --------------------------------------------------------------------
 
-function pen_show(cfg) {
-    pen_cfg = cfg;
-    pen_el("pen_current").textContent = "Saved in " + pen_config_name() + ": up " + cfg.up_us +
-        " us (S0), down " + cfg.down_us + " us (S1)";
-    pen_el("pen_cal_on").style.display = cfg.calibrating ? "" : "none";
-    pen_el("pen_cal_off").style.display = cfg.calibrating ? "none" : "";
-    pen_el("pen_spinup_ms").value = cfg.spinup_ms;
-    pen_el("pen_spindown_ms").value = cfg.spindown_ms;
-    pen_el("pen_planner_blocks").value = cfg.planner_blocks;
-    if (!pen_el("pen_up_us").value) pen_el("pen_up_us").value = cfg.up_us;
-    if (!pen_el("pen_down_us").value) pen_el("pen_down_us").value = cfg.down_us;
+function pen_show() {
+    pen_el("pen_up_z").textContent = pen_fmt(pen.up_z);
+    pen_el("pen_down_z").textContent = pen_fmt(pen.down_z);
+    pen_el("pen_code_down").textContent = pen_down_cmd();
+    pen_el("pen_code_up").textContent = pen_up_cmd();
+    pen_el("pen_park_x").value = pen.park_x;
+    pen_el("pen_park_y").value = pen.park_y;
+    if (pen_cfg) {
+        pen_el("pen_min_pulse").value = pen_cfg.min_pulse_us;
+        pen_el("pen_max_pulse").value = pen_cfg.max_pulse_us;
+        pen_el("pen_z_travel").value = pen_cfg.z_travel;
+        pen_el("pen_z_rate").value = pen_cfg.z_rate;
+        pen_el("pen_planner_blocks").value = pen_cfg.planner_blocks;
+        pen_el("pen_jog_z").min = -pen_cfg.z_travel;
+    }
+    pen_show_jog();
+}
+
+function pen_show_jog() {
+    pen_el("pen_jog_z").value = pen_fmt(pen_jog_z);
+    var p = pen_pulse_at(pen_jog_z);
+    pen_el("pen_jog_pulse").textContent = p === null ? "" : "(" + p + " us)";
 }
 
 function pen_load() {
-    pen_status("Reading " + pen_config_name() + "...");
-    pen_read_config(function(cfg) {
-        pen_el("pen_up_us").value = "";
-        pen_el("pen_down_us").value = "";
-        pen_show(cfg);
-        pen_status("");
+    pen_status("Reading settings...");
+    pen_load_state(function() {
+        pen_read_config(function(cfg) {
+            pen_cfg = cfg;
+            pen_show();
+            pen_status("");
+        });
+        pen_show();
     });
-}
-
-function pen_value(which) {
-    var v = parseInt(pen_el("pen_" + which + "_us").value, 10);
-    if (isNaN(v)) return null;
-    return Math.max(pen_min_us, Math.min(pen_max_us, v));
-}
-
-// Moves the servo to the value in the up/down field (calibration mode only)
-function pen_test(which) {
-    var v = pen_value(which);
-    if (v === null) return;
-    pen_el("pen_" + which + "_us").value = v;
-    if (!pen_cfg || !pen_cfg.calibrating) {
-        pen_status("Start calibration first", true);
-        return;
-    }
-    SendPrinterCommand("M3 S" + pen_cal_speed(v), true);
-    pen_status("Pen at " + v + " us (testing " + which + ")");
-}
-
-function pen_nudge(which, delta) {
-    var v = pen_value(which);
-    if (v === null) v = 1500;
-    pen_el("pen_" + which + "_us").value = Math.max(pen_min_us, Math.min(pen_max_us, v + delta));
-    pen_test(which);
 }
 
 function pen_machine_busy() {
@@ -326,9 +313,84 @@ function pen_machine_busy() {
     return !(s === "Idle" || s === "Alarm" || s === "Sleep");
 }
 
-// Writes newText (made from the freshly read config by buildfn), verifies it,
-// restarts FluidNC and moves the pen to `after` ("up"/"down") once back.
-function pen_rewrite(buildfn, verifyfn, after, what) {
+function pen_send_moves(cmds, what) {
+    if (pen_machine_busy()) {
+        pen_status("Machine is " + grblstate.stateName + " - wait until it is idle", true);
+        return false;
+    }
+    if (typeof grblstate !== "undefined" && grblstate && grblstate.stateName === "Alarm") {
+        pen_status("Machine is in alarm - home or unlock first", true);
+        return false;
+    }
+    cmds.forEach(function(c) { SendPrinterCommand(c, true); });
+    if (what) pen_status(what);
+    return true;
+}
+
+// ---- pen heights (live) ----------------------------------------------------
+
+function pen_clamp_z(z) {
+    var t = pen_cfg ? pen_cfg.z_travel : 1000;
+    return Math.max(-t, Math.min(0, z));
+}
+
+function pen_jog_to(z) {
+    z = pen_clamp_z(Math.round(z * 1000) / 1000);
+    if (pen_send_moves(["G53 G0 Z" + pen_fmt(z)])) {
+        pen_jog_z = z;
+        pen_status("Pen at Z" + pen_fmt(z));
+    }
+    pen_show_jog();
+}
+
+function pen_jog(delta) {
+    pen_jog_to(pen_jog_z + delta);
+}
+
+function pen_jog_field() {
+    var z = parseFloat(pen_el("pen_jog_z").value);
+    if (!isNaN(z)) pen_jog_to(z);
+}
+
+function pen_use_as(which) {
+    if (which === "up" && pen_jog_z <= pen.down_z) {
+        pen_status("Up must be above down (Z" + pen_fmt(pen.down_z) + ")", true);
+        return;
+    }
+    if (which === "down" && pen_jog_z >= pen.up_z) {
+        pen_status("Down must be below up (Z" + pen_fmt(pen.up_z) + ")", true);
+        return;
+    }
+    pen[which + "_z"] = pen_jog_z;
+    pen_show();
+    pen_save_state(function() {
+        pen_status("Pen " + which + " saved as Z" + pen_fmt(pen_jog_z) + " - update the DrawingBot preset");
+    });
+}
+
+// ---- servo + plotter settings ----------------------------------------------
+
+function pen_settings_save() {
+    var v = {
+        min_pulse_us: parseInt(pen_el("pen_min_pulse").value, 10),
+        max_pulse_us: parseInt(pen_el("pen_max_pulse").value, 10),
+        z_travel: parseFloat(pen_el("pen_z_travel").value),
+        z_rate: parseFloat(pen_el("pen_z_rate").value),
+        planner_blocks: parseInt(pen_el("pen_planner_blocks").value, 10)
+    };
+    var bad = function(x, lo, hi) { return isNaN(x) || x < lo || x > hi; };
+    if (bad(v.min_pulse_us, 500, 2500) || bad(v.max_pulse_us, 500, 2500)) {
+        pen_status("Pulse widths must be 500-2500 us", true);
+        return;
+    }
+    if (bad(v.z_travel, 1, 100) || bad(v.z_rate, 10, 100000)) {
+        pen_status("Check Z travel (1-100 mm) and Z speed", true);
+        return;
+    }
+    if (bad(v.planner_blocks, 10, 120)) {
+        pen_status("planner_blocks must be 10-120", true);
+        return;
+    }
     if (pen_machine_busy()) {
         pen_status("Machine is " + grblstate.stateName + " - wait until it is idle", true);
         return;
@@ -336,23 +398,34 @@ function pen_rewrite(buildfn, verifyfn, after, what) {
     var name = pen_config_name();
     pen_status("Reading " + name + "...");
     pen_read_config(function(cfg) {
-        var newText = buildfn(cfg);
+        var restart = cfg.z_travel !== v.z_travel || cfg.planner_blocks !== v.planner_blocks;
+        var newText = pen_build(cfg, v);
         var write = function() {
             pen_status("Writing " + name + "...");
             pen_write_file(name, newText, function() {
-                // Read it back to make sure the file on the controller is what we sent
                 pen_read_config(function(check) {
-                    if (!verifyfn(check)) {
+                    if (check.min_pulse_us !== v.min_pulse_us || check.max_pulse_us !== v.max_pulse_us ||
+                        check.z_travel !== v.z_travel || check.z_rate !== v.z_rate ||
+                        check.planner_blocks !== v.planner_blocks) {
                         pen_status("Verify failed - " + name + " was not written as expected", true);
                         return;
                     }
-                    store_localdata("pen_after_restart", after);
-                    pen_status(what + " Restarting FluidNC...");
-                    restartdlg();
+                    pen_cfg = check;
+                    if (restart) {
+                        pen_status("Saved. Restarting FluidNC for travel / planner change...");
+                        restartdlg();
+                        return;
+                    }
+                    // apply live: RcServo re-reads its pulse range on every update
+                    SendPrinterCommand("$/axes/z/motor0/rc_servo/min_pulse_us=" + v.min_pulse_us, true);
+                    SendPrinterCommand("$/axes/z/motor0/rc_servo/max_pulse_us=" + v.max_pulse_us, true);
+                    SendPrinterCommand("$/axes/z/max_rate_mm_per_min=" + v.z_rate, true);
+                    pen_show();
+                    pen_status("Saved and applied");
                 });
             });
         };
-        if (pen_backup_done || cfg.calibrating) {
+        if (pen_backup_done) {
             write();
         } else {
             pen_status("Backing up " + name + " to " + name + ".bak...");
@@ -364,95 +437,14 @@ function pen_rewrite(buildfn, verifyfn, after, what) {
     });
 }
 
-function pen_cal_start() {
-    pen_rewrite(function(cfg) {
-        return pen_build_cal(cfg, cfg.up_us, cfg.down_us);
-    }, function(check) {
-        return check.calibrating;
-    }, "up", "Calibration mode saved.");
-}
-
-// keep: true saves the up/down fields, false restores the S0/S1 values
-function pen_cal_finish(keep) {
-    var upUs = pen_value("up");
-    var downUs = pen_value("down");
-    if (keep) {
-        if (upUs === null || downUs === null) {
-            pen_status("Enter both pulse widths", true);
-            return;
-        }
-        if (upUs === downUs) {
-            pen_status("Up and down must be different", true);
-            return;
-        }
-    }
-    pen_rewrite(function(cfg) {
-        if (!keep) {
-            upUs = cfg.up_us;
-            downUs = cfg.down_us;
-        }
-        return pen_build(cfg, upUs, downUs);
-    }, function(check) {
-        return !check.calibrating && check.up_us === upUs && check.down_us === downUs;
-    }, "up", keep ? "New positions saved." : "Original positions restored.");
-}
-
 function pen_save_settings() {
     store_localdata("pen_config_file", pen_config_name());
-    store_localdata("pen_section", pen_section_name());
-    store_localdata("pen_park_x", pen_el("pen_park_x").value);
-    store_localdata("pen_park_y", pen_el("pen_park_y").value);
-}
-
-// ---- plotter settings (spindle settle times, planner_blocks) ---------------
-
-function pen_int_field(name, lo, hi) {
-    var v = parseInt(pen_el(name).value, 10);
-    if (isNaN(v) || v < lo || v > hi) return null;
-    return v;
-}
-
-function pen_settings_save() {
-    var up = pen_int_field("pen_spinup_ms", 0, 5000);
-    var dn = pen_int_field("pen_spindown_ms", 0, 5000);
-    var pb = pen_int_field("pen_planner_blocks", 10, 120);
-    if (up === null || dn === null) {
-        pen_status("Settle times must be 0-5000 ms", true);
-        return;
-    }
-    if (pb === null) {
-        pen_status("planner_blocks must be 10-120", true);
-        return;
-    }
-    pen_rewrite(function(cfg) {
-        var lines = cfg.text.split(/\r?\n/);
-        var sec = pen_find_section(lines, pen_section_name());
-        pen_set_key(lines, sec, "spinup_ms", String(up));
-        pen_set_key(lines, sec, "spindown_ms", String(dn));
-        pen_set_top_key(lines, "planner_blocks", String(pb));
-        return lines.join(cfg.crlf ? "\r\n" : "\n");
-    }, function(check) {
-        return check.spinup_ms === up && check.spindown_ms === dn && check.planner_blocks === pb;
-    }, "up", "Settings saved.");
 }
 
 // ---- moves -----------------------------------------------------------------
 
-function pen_send_moves(cmds, what) {
-    if (pen_machine_busy()) {
-        pen_status("Machine is " + grblstate.stateName + " - wait until it is idle", true);
-        return;
-    }
-    if (typeof grblstate !== "undefined" && grblstate && grblstate.stateName === "Alarm") {
-        pen_status("Machine is in alarm - home or unlock first", true);
-        return;
-    }
-    cmds.forEach(function(c) { SendPrinterCommand(c, true); });
-    if (what) pen_status(what);
-}
-
 function pen_goto_origin() {
-    pen_send_moves([pen_up_cmd, "G90 G0 X0 Y0"], "Pen up, going to X0 Y0");
+    pen_send_moves([pen_up_cmd(), "G90 G0 X0 Y0"], "Pen up, going to X0 Y0");
 }
 
 function pen_change() {
@@ -462,14 +454,16 @@ function pen_change() {
         pen_status("Set the pen change position first", true);
         return;
     }
-    pen_save_settings();
+    if (x !== pen.park_x || y !== pen.park_y) {
+        pen.park_x = x;
+        pen.park_y = y;
+        pen_save_state();
+    }
     // machine coordinates, so the spot doesn't move with the work zero
-    pen_send_moves([pen_up_cmd, "G53 G0 X" + x + " Y" + y], "Pen up, parked for pen change");
+    pen_send_moves([pen_up_cmd(), "G53 G0 X" + x + " Y" + y], "Pen up, parked for pen change");
 }
 
 // ---- frame -----------------------------------------------------------------
-
-var pen_frame_box = null;
 
 function pen_frame_files() {
     var sel = pen_el("pen_frame_file");
@@ -500,12 +494,14 @@ function pen_frame_files() {
     });
 }
 
-// Bounding box of the drawing moves (G1/G2/G3) in a G-code file, in the
-// file's own (work) coordinates.  Falls back to all moves if there are no
-// G1-G3 moves.  Arcs count by their end points only.
+// Bounding box of the drawing moves in a G-code file, in the file's own
+// (work) coordinates.  A move draws when the pen is down: Z below the
+// midpoint of the up/down heights, or a G1-G3 move if the file never
+// moves Z.  Arcs count by their end points only.
 function pen_gcode_bounds(text) {
-    var draw = null, all = null;
-    var x = 0, y = 0, absolute = true, scale = 1, motion = 0;
+    var draw = null, cut = null, all = null;
+    var x = 0, y = 0, z = 0, absolute = true, scale = 1, motion = 0, sawZ = false;
+    var mid = (pen.up_z + pen.down_z) / 2;
     var grow = function(box, px, py) {
         if (!box) return { minX: px, maxX: px, minY: py, maxY: py };
         box.minX = Math.min(box.minX, px); box.maxX = Math.max(box.maxX, px);
@@ -515,10 +511,10 @@ function pen_gcode_bounds(text) {
     var lines = text.split(/\r?\n/);
     for (var i = 0; i < lines.length; i++) {
         var l = lines[i].replace(/\(.*?\)/g, "").replace(/;.*$/, "").toUpperCase();
-        if (!l.trim()) continue;
+        if (!l.trim() || l.trim()[0] === "$") continue;
         var words = l.match(/[A-Z][+-]?[\d.]+/g);
         if (!words) continue;
-        var nx = null, ny = null, skip = false;
+        var nx = null, ny = null, nz = null, skip = false, g53 = false;
         for (var j = 0; j < words.length; j++) {
             var letter = words[j][0];
             var val = parseFloat(words[j].substr(1));
@@ -528,22 +524,32 @@ function pen_gcode_bounds(text) {
                 else if (val === 91) absolute = false;
                 else if (val === 20) scale = 25.4;
                 else if (val === 21) scale = 1;
-                else if (val === 53 || val === 28 || val === 30 || val === 92 || val === 10) { skip = true; break; }
+                else if (val === 53) g53 = true;
+                else if (val === 28 || val === 30 || val === 92 || val === 10) { skip = true; break; }
             } else if (letter === "X") nx = val * scale;
             else if (letter === "Y") ny = val * scale;
+            else if (letter === "Z") nz = val * scale;
         }
         if (skip) continue;
-        if (nx === null && ny === null) continue;
+        if (nz !== null) {
+            sawZ = true;
+            z = (absolute || g53) ? nz : z + nz;
+        }
+        if (g53 || (nx === null && ny === null)) continue;
         var px = x, py = y;
         if (nx !== null) x = absolute ? nx : x + nx;
         if (ny !== null) y = absolute ? ny : y + ny;
         all = grow(all, x, y);
-        if (motion >= 1) {
+        if (z < mid) {
             draw = grow(draw, px, py);
             draw = grow(draw, x, y);
         }
+        if (motion >= 1) {
+            cut = grow(cut, px, py);
+            cut = grow(cut, x, y);
+        }
     }
-    return draw || all;
+    return (sawZ ? draw : cut) || all;
 }
 
 function pen_frame_load(successfn) {
@@ -579,7 +585,7 @@ function pen_frame() {
     pen_frame_load(function(b) {
         var f = function(v) { return v.toFixed(3); };
         pen_send_moves([
-            pen_up_cmd,
+            pen_up_cmd(),
             "G90 G0 X" + f(b.minX) + " Y" + f(b.minY),
             "G0 X" + f(b.maxX) + " Y" + f(b.minY),
             "G0 X" + f(b.maxX) + " Y" + f(b.maxY),
@@ -592,24 +598,7 @@ function pen_frame() {
 function init_pen_panel() {
     if (!pen_el("pentab")) return;
     var f = get_localdata("pen_config_file");
-    var s = get_localdata("pen_section");
     if (f) pen_el("pen_config_file").value = f;
-    if (s) pen_el("pen_section").value = s;
-    var px = get_localdata("pen_park_x");
-    var py = get_localdata("pen_park_y");
-    if (px) pen_el("pen_park_x").value = px;
-    if (py) pen_el("pen_park_y").value = py;
     pen_load();
     pen_frame_files();
-    var after = get_localdata("pen_after_restart");
-    if (after === "up" || after === "down") {
-        delete_localdata("pen_after_restart");
-        var link = pen_el("pentablink");
-        if (link) link.click();
-        // give the controller a moment after the reload before moving the pen
-        setTimeout(function() {
-            if (after === "up") pen_up(); else pen_down();
-            pen_status("Restarted - pen moved " + after);
-        }, 1500);
-    }
 }
