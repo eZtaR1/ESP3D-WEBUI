@@ -7,6 +7,47 @@
                 <button type="button" class="btn btn-info btn-lg" onclick="pen_down()">Pen down (M3 S1)</button>
             </div>
             <p id="pen_current" style="text-align: center; margin: 0;"></p>
+            <div style="display: flex; gap: 0.5em; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 0.8em;">
+                <button type="button" class="btn btn-default" onclick="pen_goto_origin()">Go to X0 Y0</button>
+                <button type="button" class="btn btn-warning" onclick="pen_change()">Pen change</button>
+                <label for="pen_park_x">at machine X</label>
+                <input autocomplete="off" type="number" class="form-control" style="width: 5.5em;" id="pen_park_x" value="398" onchange="pen_save_settings()">
+                <label for="pen_park_y">Y</label>
+                <input autocomplete="off" type="number" class="form-control" style="width: 5.5em;" id="pen_park_y" value="362" onchange="pen_save_settings()">
+            </div>
+            <div style="display: flex; gap: 0.5em; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 0.8em;">
+                <label for="pen_frame_file">Frame</label>
+                <select class="form-control" style="width: 14em;" id="pen_frame_file" onchange="pen_frame_box = null; pen_el('pen_frame_info').textContent = '';"></select>
+                <button type="button" class="btn btn-default btn-sm" onclick="pen_frame_files()" title="Refresh file list">&#x21bb;</button>
+                <button type="button" class="btn btn-primary" onclick="pen_frame()">Frame (pen up)</button>
+            </div>
+            <p id="pen_frame_info" style="text-align: center; margin: 0.3em 0 0 0;"></p>
+        </div>
+    </div>
+
+    <div class="panel panel-default" style="max-width: 40em; margin: 1em auto;">
+        <div class="panel-heading"><b>Plotter settings</b></div>
+        <div class="panel-body">
+            <table style="margin: 0 auto; border-spacing: 0.4em; border-collapse: separate;">
+                <tr>
+                    <td><label for="pen_spinup_ms">Pen down settle</label></td>
+                    <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_spinup_ms" min="0" max="5000" step="10"></td>
+                    <td>ms <small>(spinup_ms - raise if lines start with a blob or tail, try 150-250)</small></td>
+                </tr>
+                <tr>
+                    <td><label for="pen_spindown_ms">Pen up settle</label></td>
+                    <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_spindown_ms" min="0" max="5000" step="10"></td>
+                    <td>ms <small>(spindown_ms - lower until lines drag at the end)</small></td>
+                </tr>
+                <tr>
+                    <td><label for="pen_planner_blocks">Planner blocks</label></td>
+                    <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_planner_blocks" min="10" max="120"></td>
+                    <td><small>(planner_blocks - lookahead for smooth curves, try 32-64)</small></td>
+                </tr>
+            </table>
+            <div style="text-align: center;">
+                <button type="button" class="btn btn-primary" onclick="pen_settings_save()">Save &amp; restart</button>
+            </div>
         </div>
     </div>
 

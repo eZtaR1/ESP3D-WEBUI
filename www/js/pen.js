@@ -117,6 +117,30 @@ function pen_set_key(lines, sec, key, value) {
     sec.end++;
 }
 
+// Top-level (unindented) key such as planner_blocks
+function pen_get_top_key(lines, key) {
+    var re = pen_key_regex(key, 0);
+    for (var i = 0; i < lines.length; i++) {
+        var m = lines[i].match(re);
+        if (m) return { index: i, value: m[2].trim() };
+    }
+    return null;
+}
+
+function pen_set_top_key(lines, key, value) {
+    var re = pen_key_regex(key, 0);
+    for (var i = 0; i < lines.length; i++) {
+        var m = lines[i].match(re);
+        if (m) {
+            lines[i] = m[1] + value + (m[3] || "");
+            return;
+        }
+    }
+    var end = lines.length;
+    while (end > 0 && lines[end - 1].trim() === "") end--;
+    lines.splice(end, 0, key + ": " + value);
+}
+
 // Percent of the [min,max] pulse range that speed S maps to, by linear
 // interpolation of speed_map ("0=100.00% 1=0.00%" style).  Speeds outside
 // the map clamp to its end points.
@@ -149,6 +173,9 @@ function pen_parse(text) {
     var minUs = minK ? parseFloat(minK.value) : 900;   // FluidNC defaults
     var maxUs = maxK ? parseFloat(maxK.value) : 2200;
     var speedMap = mapK ? mapK.value : "";
+    var upK = pen_get_key(lines, sec, "spinup_ms");
+    var dnK = pen_get_key(lines, sec, "spindown_ms");
+    var pbK = pen_get_top_key(lines, "planner_blocks");
     var pUp = speedMap ? pen_map_percent(speedMap, 0) : null;
     var pDown = speedMap ? pen_map_percent(speedMap, 1) : null;
     if (pUp === null || pDown === null) {
@@ -163,6 +190,9 @@ function pen_parse(text) {
         up_us: Math.round(minUs + (maxUs - minUs) * pUp / 100),
         down_us: Math.round(minUs + (maxUs - minUs) * pDown / 100),
         simple: (pUp === 0 || pUp === 100) && (pDown === 0 || pDown === 100) && pUp !== pDown,
+        spinup_ms: upK ? parseInt(upK.value, 10) : 0,
+        spindown_ms: dnK ? parseInt(dnK.value, 10) : 0,
+        planner_blocks: pbK ? parseInt(pbK.value, 10) : 16,
         calibrating: minUs === pen_min_us && maxUs === pen_max_us && pen_is_cal_map(speedMap)
     };
 }
@@ -247,6 +277,9 @@ function pen_show(cfg) {
         " us (S0), down " + cfg.down_us + " us (S1)";
     pen_el("pen_cal_on").style.display = cfg.calibrating ? "" : "none";
     pen_el("pen_cal_off").style.display = cfg.calibrating ? "none" : "";
+    pen_el("pen_spinup_ms").value = cfg.spinup_ms;
+    pen_el("pen_spindown_ms").value = cfg.spindown_ms;
+    pen_el("pen_planner_blocks").value = cfg.planner_blocks;
     if (!pen_el("pen_up_us").value) pen_el("pen_up_us").value = cfg.up_us;
     if (!pen_el("pen_down_us").value) pen_el("pen_down_us").value = cfg.down_us;
 }
@@ -367,6 +400,193 @@ function pen_cal_finish(keep) {
 function pen_save_settings() {
     store_localdata("pen_config_file", pen_config_name());
     store_localdata("pen_section", pen_section_name());
+    store_localdata("pen_park_x", pen_el("pen_park_x").value);
+    store_localdata("pen_park_y", pen_el("pen_park_y").value);
+}
+
+// ---- plotter settings (spindle settle times, planner_blocks) ---------------
+
+function pen_int_field(name, lo, hi) {
+    var v = parseInt(pen_el(name).value, 10);
+    if (isNaN(v) || v < lo || v > hi) return null;
+    return v;
+}
+
+function pen_settings_save() {
+    var up = pen_int_field("pen_spinup_ms", 0, 5000);
+    var dn = pen_int_field("pen_spindown_ms", 0, 5000);
+    var pb = pen_int_field("pen_planner_blocks", 10, 120);
+    if (up === null || dn === null) {
+        pen_status("Settle times must be 0-5000 ms", true);
+        return;
+    }
+    if (pb === null) {
+        pen_status("planner_blocks must be 10-120", true);
+        return;
+    }
+    pen_rewrite(function(cfg) {
+        var lines = cfg.text.split(/\r?\n/);
+        var sec = pen_find_section(lines, pen_section_name());
+        pen_set_key(lines, sec, "spinup_ms", String(up));
+        pen_set_key(lines, sec, "spindown_ms", String(dn));
+        pen_set_top_key(lines, "planner_blocks", String(pb));
+        return lines.join(cfg.crlf ? "\r\n" : "\n");
+    }, function(check) {
+        return check.spinup_ms === up && check.spindown_ms === dn && check.planner_blocks === pb;
+    }, "up", "Settings saved.");
+}
+
+// ---- moves -----------------------------------------------------------------
+
+function pen_send_moves(cmds, what) {
+    if (pen_machine_busy()) {
+        pen_status("Machine is " + grblstate.stateName + " - wait until it is idle", true);
+        return;
+    }
+    if (typeof grblstate !== "undefined" && grblstate && grblstate.stateName === "Alarm") {
+        pen_status("Machine is in alarm - home or unlock first", true);
+        return;
+    }
+    cmds.forEach(function(c) { SendPrinterCommand(c, true); });
+    if (what) pen_status(what);
+}
+
+function pen_goto_origin() {
+    pen_send_moves([pen_up_cmd, "G90 G0 X0 Y0"], "Pen up, going to X0 Y0");
+}
+
+function pen_change() {
+    var x = parseFloat(pen_el("pen_park_x").value);
+    var y = parseFloat(pen_el("pen_park_y").value);
+    if (isNaN(x) || isNaN(y)) {
+        pen_status("Set the pen change position first", true);
+        return;
+    }
+    pen_save_settings();
+    // machine coordinates, so the spot doesn't move with the work zero
+    pen_send_moves([pen_up_cmd, "G53 G0 X" + x + " Y" + y], "Pen up, parked for pen change");
+}
+
+// ---- frame -----------------------------------------------------------------
+
+var pen_frame_box = null;
+
+function pen_frame_files() {
+    var sel = pen_el("pen_frame_file");
+    fileList(FILE_VOLUME_SD, "/", function(text) {
+        var resp;
+        try {
+            resp = JSON.parse(text);
+        } catch (e) {
+            pen_status("Could not list SD card files", true);
+            return;
+        }
+        var cur = sel.value;
+        var names = (resp.files || []).filter(function(f) {
+            return f.size != "-1" && /\.(g|gc|gco|gcode|nc|ngc|tap|txt)$/i.test(f.name);
+        }).map(function(f) { return f.name; }).sort();
+        sel.innerHTML = "";
+        names.forEach(function(n) {
+            var o = document.createElement("option");
+            o.value = n;
+            o.textContent = n;
+            sel.appendChild(o);
+        });
+        if (names.indexOf(cur) >= 0) sel.value = cur;
+        pen_frame_box = null;
+        pen_el("pen_frame_info").textContent = names.length ? "" : "No G-code files in the SD card root";
+    }, function(code) {
+        pen_status("Could not list SD card files (" + code + ")", true);
+    });
+}
+
+// Bounding box of the drawing moves (G1/G2/G3) in a G-code file, in the
+// file's own (work) coordinates.  Falls back to all moves if there are no
+// G1-G3 moves.  Arcs count by their end points only.
+function pen_gcode_bounds(text) {
+    var draw = null, all = null;
+    var x = 0, y = 0, absolute = true, scale = 1, motion = 0;
+    var grow = function(box, px, py) {
+        if (!box) return { minX: px, maxX: px, minY: py, maxY: py };
+        box.minX = Math.min(box.minX, px); box.maxX = Math.max(box.maxX, px);
+        box.minY = Math.min(box.minY, py); box.maxY = Math.max(box.maxY, py);
+        return box;
+    };
+    var lines = text.split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+        var l = lines[i].replace(/\(.*?\)/g, "").replace(/;.*$/, "").toUpperCase();
+        if (!l.trim()) continue;
+        var words = l.match(/[A-Z][+-]?[\d.]+/g);
+        if (!words) continue;
+        var nx = null, ny = null, skip = false;
+        for (var j = 0; j < words.length; j++) {
+            var letter = words[j][0];
+            var val = parseFloat(words[j].substr(1));
+            if (letter === "G") {
+                if (val === 0 || val === 1 || val === 2 || val === 3) motion = val;
+                else if (val === 90) absolute = true;
+                else if (val === 91) absolute = false;
+                else if (val === 20) scale = 25.4;
+                else if (val === 21) scale = 1;
+                else if (val === 53 || val === 28 || val === 30 || val === 92 || val === 10) { skip = true; break; }
+            } else if (letter === "X") nx = val * scale;
+            else if (letter === "Y") ny = val * scale;
+        }
+        if (skip) continue;
+        if (nx === null && ny === null) continue;
+        var px = x, py = y;
+        if (nx !== null) x = absolute ? nx : x + nx;
+        if (ny !== null) y = absolute ? ny : y + ny;
+        all = grow(all, x, y);
+        if (motion >= 1) {
+            draw = grow(draw, px, py);
+            draw = grow(draw, x, y);
+        }
+    }
+    return draw || all;
+}
+
+function pen_frame_load(successfn) {
+    var name = pen_el("pen_frame_file").value;
+    if (!name) {
+        pen_status("Pick a file", true);
+        return;
+    }
+    if (pen_frame_box && pen_frame_box.name === name) {
+        successfn(pen_frame_box);
+        return;
+    }
+    pen_status("Reading " + name + "...");
+    fileRead(FILE_VOLUME_SD, "/sd/" + name, function(text) {
+        var b = pen_gcode_bounds(text);
+        if (!b) {
+            pen_status("No X/Y moves found in " + name, true);
+            return;
+        }
+        b.name = name;
+        pen_frame_box = b;
+        pen_el("pen_frame_info").textContent = "X " + b.minX.toFixed(1) + " to " + b.maxX.toFixed(1) +
+            ", Y " + b.minY.toFixed(1) + " to " + b.maxY.toFixed(1) +
+            " (" + (b.maxX - b.minX).toFixed(1) + " x " + (b.maxY - b.minY).toFixed(1) + " mm)";
+        pen_status("");
+        successfn(b);
+    }, function(code) {
+        pen_status("Could not read " + name + " (" + code + ")", true);
+    });
+}
+
+function pen_frame() {
+    pen_frame_load(function(b) {
+        var f = function(v) { return v.toFixed(3); };
+        pen_send_moves([
+            pen_up_cmd,
+            "G90 G0 X" + f(b.minX) + " Y" + f(b.minY),
+            "G0 X" + f(b.maxX) + " Y" + f(b.minY),
+            "G0 X" + f(b.maxX) + " Y" + f(b.maxY),
+            "G0 X" + f(b.minX) + " Y" + f(b.maxY),
+            "G0 X" + f(b.minX) + " Y" + f(b.minY)
+        ], "Framing " + b.name + " with the pen up");
+    });
 }
 
 function init_pen_panel() {
@@ -375,7 +595,12 @@ function init_pen_panel() {
     var s = get_localdata("pen_section");
     if (f) pen_el("pen_config_file").value = f;
     if (s) pen_el("pen_section").value = s;
+    var px = get_localdata("pen_park_x");
+    var py = get_localdata("pen_park_y");
+    if (px) pen_el("pen_park_x").value = px;
+    if (py) pen_el("pen_park_y").value = py;
     pen_load();
+    pen_frame_files();
     var after = get_localdata("pen_after_restart");
     if (after === "up" || after === "down") {
         delete_localdata("pen_after_restart");
