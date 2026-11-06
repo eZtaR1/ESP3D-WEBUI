@@ -1,0 +1,50 @@
+<div id="pentab" class="tabcontent">
+    <div class="panel panel-default" style="max-width: 40em; margin: 1em auto;">
+        <div class="panel-heading"><b>Pen</b></div>
+        <div class="panel-body">
+            <div style="display: flex; gap: 1em; justify-content: center; margin-bottom: 0.5em;">
+                <button type="button" class="btn btn-default btn-lg" onclick="pen_up()">Pen up (M3 S0)</button>
+                <button type="button" class="btn btn-info btn-lg" onclick="pen_down()">Pen down (M3 S1)</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel panel-default" style="max-width: 40em; margin: 1em auto;">
+        <div class="panel-heading"><b>Calibrate servo</b></div>
+        <div class="panel-body">
+            <p id="pen_current" style="text-align: center;"></p>
+            <table style="margin: 0 auto; border-spacing: 0.4em; border-collapse: separate;">
+                <tr>
+                    <td><b>Up</b> (us)</td>
+                    <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('up', -50)">-50</button></td>
+                    <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('up', -10)">-10</button></td>
+                    <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_up_us" min="500" max="2500" step="10"></td>
+                    <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('up', 10)">+10</button></td>
+                    <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('up', 50)">+50</button></td>
+                    <td><button type="button" class="btn btn-primary btn-sm" onclick="pen_apply('up')">Apply &amp; test up</button></td>
+                </tr>
+                <tr>
+                    <td><b>Down</b> (us)</td>
+                    <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('down', -50)">-50</button></td>
+                    <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('down', -10)">-10</button></td>
+                    <td><input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_down_us" min="500" max="2500" step="10"></td>
+                    <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('down', 10)">+10</button></td>
+                    <td><button type="button" class="btn btn-default btn-sm" onclick="pen_nudge('down', 50)">+50</button></td>
+                    <td><button type="button" class="btn btn-primary btn-sm" onclick="pen_apply('down')">Apply &amp; test down</button></td>
+                </tr>
+            </table>
+            <p style="text-align: center; margin-top: 0.5em;">
+                <small>Apply writes the values to the config file (other lines and comments are kept,
+                the original is saved once as <i>.bak</i>), restarts FluidNC, then moves the pen.</small>
+            </p>
+            <p id="pen_status" style="text-align: center; font-weight: bold;"></p>
+            <div style="display: flex; gap: 0.5em; justify-content: center; align-items: center; flex-wrap: wrap;">
+                <label for="pen_config_file">Config file</label>
+                <input autocomplete="off" type="text" class="form-control" style="width: 10em;" id="pen_config_file" value="config.yaml" onchange="pen_save_settings()">
+                <label for="pen_section">Spindle</label>
+                <input autocomplete="off" type="text" class="form-control" style="width: 6em;" id="pen_section" value="BESC" onchange="pen_save_settings()">
+                <button type="button" class="btn btn-default btn-sm" onclick="pen_load()">Reload</button>
+            </div>
+        </div>
+    </div>
+</div>
