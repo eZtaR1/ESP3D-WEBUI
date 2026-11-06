@@ -25,7 +25,7 @@ change pen heights, so the copies here are only the starting point.
 | Drivers | TMC2209 over UART1 (X addr 0, Y addr 1), 16 microsteps, StealthChop |
 | X | 80 steps/mm, 400 mm travel, 5000 mm/min, 500 mm/s² |
 | Y | 80 steps/mm, 365 mm travel, 5000 mm/min, 1000 mm/s² |
-| Homing | Sensorless (StallGuard) toward negative, X first then Y. X: seek 2000 / feed 500 / stallguard 24. Y: stallguard 30 |
+| Homing | Sensorless (StallGuard) toward negative, X first then Y. X: seek 2000 / feed 500 / stallguard 24. Y: stallguard 30. Set up following [TMC2209 and UART using FluidNC](https://diode-laser-wiki.com/documentation/projects/tmc2209-and-uart-using-fluidnc/) |
 | After homing | Pen up, then park at X398 Y362 |
 | Motors | Always held (`idle_ms: 255`); required, the machine is wall-mounted |
 | Pen | RC servo on Z, signal on `gpio.22`, 50 Hz |
