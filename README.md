@@ -6,6 +6,40 @@
 The version in this branch includes a tablet-optimized alternative UI that
 is available from the Tablet tab at the top of the page.
 
+## Pen plotter additions (this fork)
+
+This fork adds pen plotter controls for FluidNC machines whose pen is lifted
+by an RC servo driven as the Z axis (`rc_servo` motor on Z). Pen heights are
+machine Z positions (`G53 G0 Z…`).
+
+- **Dashboard → GRBL panel → Pen tab** (the default tab; Override and Spindle
+  are hidden): pen up/down, go to X0 Y0, pen change park, frame a file from the
+  SD card, and live pen height jog with **Use as pen up/down**. Heights are
+  stored in `pen.json` on the controller and written to `macro1.g` (down) and
+  `macro2.g` (up).
+- **Preferences → Pen plotter**: servo pulse range, Z travel, pen speed (Z max
+  rate) and planner blocks, applied with **Apply to controller**. Only those
+  lines of the config file are edited; the original is kept once as
+  `<config>.bak`. Pulse range and speed apply live through `$/` settings;
+  Z travel and planner blocks restart FluidNC.
+- Frame, Go to X0 Y0 and Pen change refuse to move until X/Y have been homed
+  since the page was opened (`[MSG:Homed:XY]` seen on the console). `$X` lets
+  FluidNC move unhomed, so the UI checks this itself and offers to home.
+
+Example machine config, DrawingBotV3 preset, macros and setup notes:
+[`plotter-z/`](plotter-z/README.md).
+
+### Build and install
+
+```bash
+npx gulp package --lang en
+```
+
+Upload the resulting `index.html.gz` (repo root) to the controller's flash and
+reload the page. If an upload fails and the page no longer loads, open
+`http://<controller>/?forcefallback=yes` for FluidNC's built-in file manager
+and upload it again.
+
 [Latest stable release ![Release Version](https://img.shields.io/github/v/release/luc-github/ESP3D-WEBUI?color=green&include_prereleases&style=plastic) ![Release Date](https://img.shields.io/github/release-date/luc-github/ESP3D-WEBUI.svg?style=plastic)](https://github.com/luc-github/ESP3D-WEBUI/releases/latest/) [![Travis (.org) branch](https://img.shields.io/travis/luc-github/ESP3D-WEBUI/2.1?style=plastic)](https://travis-ci.org/github/luc-github/ESP3D-WEBUI)   
 
 [Latest development version ![Development Version](https://img.shields.io/badge/Devt-v3.0-yellow?style=plastic) ![GitHub last commit (branch)](https://img.shields.io/github/last-commit/luc-github/ESP3D-WEBUI/3.0?style=plastic)](https://github.com/luc-github/ESP3D-WEBUI/tree/3.0) [![Travis (.org) branch](https://img.shields.io/travis/luc-github/ESP3D-WEBUI/3.0?style=plastic)](https://travis-ci.org/github/luc-github/ESP3D-WEBUI)     
