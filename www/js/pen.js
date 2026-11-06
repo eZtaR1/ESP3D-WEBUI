@@ -43,10 +43,11 @@ function pen_el(name) {
 }
 
 function pen_status(msg, isError) {
-    var e = pen_el("pen_status");
-    if (!e) return;
-    e.textContent = msg;
-    e.style.color = isError ? "#c9302c" : "";
+    var els = document.getElementsByClassName("pen-status");
+    for (var i = 0; i < els.length; i++) {
+        els[i].textContent = msg;
+        els[i].style.color = isError ? "#c9302c" : "";
+    }
 }
 
 function pen_config_name() {
@@ -441,10 +442,66 @@ function pen_save_settings() {
     store_localdata("pen_config_file", pen_config_name());
 }
 
+// ---- homing check ----------------------------------------------------------
+// FluidNC's status report doesn't say whether the axes are homed, and $X
+// (unlock) lets the machine move without homing.  So the panel only trusts
+// a homing cycle it has seen finish since the page was opened: FluidNC
+// prints "[MSG:Homed:XY]" then.  An alarm or a restart clears it.  This
+// works from the console stream, so it doesn't need status reports on.
+
+var pen_homed_axes = "";
+
+function pen_homed() {
+    return pen_homed_axes.indexOf("X") >= 0 && pen_homed_axes.indexOf("Y") >= 0;
+}
+
+function pen_watch_line(line) {
+    var m = line.match(/^\[MSG:Homed:([A-Z]*)\]/);
+    if (m) {
+        for (var i = 0; i < m[1].length; i++) {
+            if (pen_homed_axes.indexOf(m[1][i]) < 0) pen_homed_axes += m[1][i];
+        }
+        if (pen_homed()) pen_status("Homed");
+    } else if (/^ALARM:/.test(line) || /'\$' for help/.test(line) || /^\[MSG:.*Unhomed/.test(line)) {
+        pen_homed_axes = "";
+    }
+}
+
+function pen_watch_homing(state) {
+    if (state.stateName === "Alarm") pen_homed_axes = "";
+}
+
+// Runs fn if X/Y have been homed, otherwise offers to home first
+function pen_if_homed(fn) {
+    if (pen_homed()) {
+        fn();
+        return;
+    }
+    confirmdlg("Not homed",
+        "X/Y haven't been homed since this page was opened, so the machine may not be where it thinks it is. Home now?",
+        function(answer) {
+            if (answer !== "yes") {
+                pen_status("Cancelled - home first", true);
+                return;
+            }
+            if (pen_machine_busy()) {
+                pen_status("Machine is " + grblstate.stateName + " - wait until it is idle", true);
+                return;
+            }
+            // G-code is refused in Alarm, so the pen can only be lifted first when not in alarm
+            var inAlarm = typeof grblstate !== "undefined" && grblstate && grblstate.stateName === "Alarm";
+            if (!inAlarm) SendPrinterCommand(pen_up_cmd(), true);
+            SendPrinterCommand("$H", true);
+            pen_status("Homing...");
+        });
+}
+
 // ---- moves -----------------------------------------------------------------
 
 function pen_goto_origin() {
-    pen_send_moves([pen_up_cmd(), "G90 G0 X0 Y0"], "Pen up, going to X0 Y0");
+    pen_if_homed(function() {
+        pen_send_moves([pen_up_cmd(), "G90 G0 X0 Y0"], "Pen up, going to X0 Y0");
+    });
 }
 
 function pen_change() {
@@ -460,7 +517,9 @@ function pen_change() {
         pen_save_state();
     }
     // machine coordinates, so the spot doesn't move with the work zero
-    pen_send_moves([pen_up_cmd(), "G53 G0 X" + x + " Y" + y], "Pen up, parked for pen change");
+    pen_if_homed(function() {
+        pen_send_moves([pen_up_cmd(), "G53 G0 X" + x + " Y" + y], "Pen up, parked for pen change");
+    });
 }
 
 // ---- frame -----------------------------------------------------------------
@@ -582,6 +641,12 @@ function pen_frame_load(successfn) {
 }
 
 function pen_frame() {
+    pen_if_homed(function() {
+        pen_frame_go();
+    });
+}
+
+function pen_frame_go() {
     pen_frame_load(function(b) {
         var f = function(v) { return v.toFixed(3); };
         pen_send_moves([

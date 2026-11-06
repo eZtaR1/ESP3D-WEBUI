@@ -1,54 +1,5 @@
 <div id="pentab" class="tabcontent">
     <div class="panel panel-default" style="max-width: 40em; margin: 1em auto;">
-        <div class="panel-heading"><b>Pen</b></div>
-        <div class="panel-body">
-            <div style="display: flex; gap: 1em; justify-content: center; margin-bottom: 0.5em;">
-                <button type="button" class="btn btn-default btn-lg" onclick="pen_up()">Pen up (Z<span id="pen_up_z"></span>)</button>
-                <button type="button" class="btn btn-info btn-lg" onclick="pen_down()">Pen down (Z<span id="pen_down_z"></span>)</button>
-            </div>
-            <div style="display: flex; gap: 0.5em; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 0.8em;">
-                <button type="button" class="btn btn-default" onclick="pen_goto_origin()">Go to X0 Y0</button>
-                <button type="button" class="btn btn-warning" onclick="pen_change()">Pen change</button>
-                <label for="pen_park_x">at machine X</label>
-                <input autocomplete="off" type="number" class="form-control" style="width: 5.5em;" id="pen_park_x" value="398">
-                <label for="pen_park_y">Y</label>
-                <input autocomplete="off" type="number" class="form-control" style="width: 5.5em;" id="pen_park_y" value="362">
-            </div>
-            <div style="display: flex; gap: 0.5em; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 0.8em;">
-                <label for="pen_frame_file">Frame</label>
-                <select class="form-control" style="width: 14em;" id="pen_frame_file" onchange="pen_frame_box = null; pen_el('pen_frame_info').textContent = '';"></select>
-                <button type="button" class="btn btn-default btn-sm" onclick="pen_frame_files()" title="Refresh file list">&#x21bb;</button>
-                <button type="button" class="btn btn-primary" onclick="pen_frame()">Frame (pen up)</button>
-            </div>
-            <p id="pen_frame_info" style="text-align: center; margin: 0.3em 0 0 0;"></p>
-            <p id="pen_status" style="text-align: center; font-weight: bold; margin: 0.5em 0 0 0;"></p>
-        </div>
-    </div>
-
-    <div class="panel panel-default" style="max-width: 40em; margin: 1em auto;">
-        <div class="panel-heading"><b>Pen heights</b> <small>(moves live)</small></div>
-        <div class="panel-body">
-            <div style="display: flex; gap: 0.4em; justify-content: center; align-items: center; flex-wrap: wrap;">
-                <button type="button" class="btn btn-default btn-sm" onclick="pen_jog(-1)">-1</button>
-                <button type="button" class="btn btn-default btn-sm" onclick="pen_jog(-0.2)">-0.2</button>
-                <label for="pen_jog_z">Z</label>
-                <input autocomplete="off" type="number" class="form-control" style="width: 6em;" id="pen_jog_z" max="0" step="0.1" onchange="pen_jog_field()">
-                <span id="pen_jog_pulse"></span>
-                <button type="button" class="btn btn-default btn-sm" onclick="pen_jog(0.2)">+0.2</button>
-                <button type="button" class="btn btn-default btn-sm" onclick="pen_jog(1)">+1</button>
-            </div>
-            <div style="display: flex; gap: 1em; justify-content: center; margin-top: 0.6em;">
-                <button type="button" class="btn btn-primary" onclick="pen_use_as('up')">Use as pen up</button>
-                <button type="button" class="btn btn-primary" onclick="pen_use_as('down')">Use as pen down</button>
-            </div>
-            <p style="text-align: center; margin: 0.6em 0 0 0;"><small>
-                Saved to <i>pen.json</i>, <i>macro1.g</i> (down) and <i>macro2.g</i> (up).
-                DrawingBot pen down code: <code id="pen_code_down"></code>, pen up code: <code id="pen_code_up"></code>
-            </small></p>
-        </div>
-    </div>
-
-    <div class="panel panel-default" style="max-width: 40em; margin: 1em auto;">
         <div class="panel-heading"><b>Servo &amp; plotter settings</b></div>
         <div class="panel-body">
             <table style="margin: 0 auto; border-spacing: 0.4em; border-collapse: separate;">
@@ -86,7 +37,8 @@
                 <input autocomplete="off" type="text" class="form-control" style="width: 10em;" id="pen_config_file" value="config.yaml" onchange="pen_save_settings()">
                 <button type="button" class="btn btn-default btn-sm" onclick="pen_load()">Reload</button>
             </div>
-            <p style="text-align: center; margin-top: 0.5em;"><small>Only these lines in the config file are changed.
+            <p class="pen-status" style="text-align: center; font-weight: bold; margin: 0.5em 0 0 0;"></p>
+            <p style="text-align: center; margin-top: 0.5em;"><small>Pen controls are on the Dashboard, in the GRBL panel's Pen tab. Only these lines in the config file are changed.
                 The original file is saved once as <i>.bak</i>.</small></p>
         </div>
     </div>

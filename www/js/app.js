@@ -141,6 +141,7 @@ function startSocket() {
                     msg = "";
                     Monitor_output_Update(thismsg);
                     process_socket_response(thismsg);
+                    if (typeof pen_watch_line !== 'undefined') pen_watch_line(thismsg);
                     if (!((thismsg.startsWith("<") || thismsg.startsWith("ok T:") || thismsg.startsWith("X:") || thismsg.startsWith("FR:") ||thismsg.startsWith("echo:E0 Flow")))) {
                         // console.log(thismsg);
                     }
@@ -394,8 +395,8 @@ function initUI() {
     // Get the element with id="defaultOpen" and click on it
     id("maintablink").click();
 
-    if (typeof id("grblcontroltablink") !== 'undefined') {
-        id("grblcontroltablink").click();
+    if (typeof id("grblpentablink") !== 'undefined') {
+        id("grblpentablink").click();
     }
 
     //removeIf(production)

@@ -218,7 +218,7 @@ function applypreferenceslist() {
     if (preferenceslist[0].enable_grbl_probe_panel === 'true') {
         displayBlock('grblprobetablink');
     } else {
-        id("grblcontroltablink").click();
+        id("grblpentablink").click();
         displayNone('grblprobetablink');
     }
 

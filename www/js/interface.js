@@ -400,6 +400,7 @@ const mainGrblState = (grblstate) => {
     show_grbl_status(grblstate.stateName, grblstate.message, grblstate.sdName);
     show_grbl_SD(grblstate.sdName, grblstate.sdPercent);
     show_grbl_probe_status(grblstate.pins && (grblstate.pins.indexOf('P') != -1));
+    if (typeof pen_watch_homing !== 'undefined') pen_watch_homing(grblstate);
 };
 
 const grblHandleOk = () => {
